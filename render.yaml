@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: school-management-mysql
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_HOST
+        fromDatabase:
+          name: school-mysql
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: school-mysql
+          property: port
+      - key: DB_USER
+        fromDatabase:
+          name: school-mysql
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: school-mysql
+          property: password
+      - key: DB_NAME
+        fromDatabase:
+          name: school-mysql
+          property: database
+
+databases:
+  - name: school-mysql
+    plan: free
