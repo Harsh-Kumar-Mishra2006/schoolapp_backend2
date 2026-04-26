@@ -8,6 +8,8 @@ const rateLimit = require('express-rate-limit');
 const { connectDB, sequelize } = require('./config/db');
 const attendanceRoutes = require('./routes/attendenceRoutes');
 const resultRoutes = require('./routes/resultRoutes');
+// Add to your server.js imports
+const feeRoutes = require('./routes/feeRoutes');
 
 // Import routes
 const authRoutes = require('./routes/authRoutes');
@@ -49,6 +51,7 @@ if (process.env.NODE_ENV === 'development') {
 app.use('/api/auth', authRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/results', resultRoutes);
+app.use('/api/fees', feeRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {

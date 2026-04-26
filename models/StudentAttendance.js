@@ -7,7 +7,7 @@ const StudentAttendance = sequelize.define('StudentAttendance', {
     primaryKey: true,
     autoIncrement: true
   },
-  studentId: {
+  student_id: {  // ← Changed from studentId
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
@@ -27,7 +27,7 @@ const StudentAttendance = sequelize.define('StudentAttendance', {
     type: DataTypes.STRING(20),
     allowNull: false
   },
-  rollNumber: {
+  roll_number: {  // ← Changed from rollNumber
     type: DataTypes.STRING(20),
     allowNull: false
   },
@@ -35,7 +35,7 @@ const StudentAttendance = sequelize.define('StudentAttendance', {
     type: DataTypes.STRING(10),
     allowNull: false
   },
-  parentEmail: {
+  parent_email: {  // ← Changed from parentEmail
     type: DataTypes.STRING(100),
     allowNull: true
   },
@@ -48,17 +48,17 @@ const StudentAttendance = sequelize.define('StudentAttendance', {
     type: DataTypes.INTEGER,
     allowNull: false
   },
-  totalWorkingDays: {
+  total_working_days: {  // ← Changed from totalWorkingDays
     type: DataTypes.INTEGER,
     allowNull: false,
     defaultValue: 0
   },
-  daysPresent: {
+  days_present: {  // ← Changed from daysPresent
     type: DataTypes.INTEGER,
     allowNull: false,
     defaultValue: 0
   },
-  daysAbsent: {
+  days_absent: {  // ← Changed from daysAbsent
     type: DataTypes.INTEGER,
     allowNull: false,
     defaultValue: 0
@@ -73,7 +73,7 @@ const StudentAttendance = sequelize.define('StudentAttendance', {
     allowNull: true,
     comment: 'Manual remark added by admin'
   },
-  addedBy: {
+  added_by: {  // ← Changed from addedBy
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
@@ -83,10 +83,11 @@ const StudentAttendance = sequelize.define('StudentAttendance', {
   }
 }, {
   timestamps: true,
+  underscored: true,  // ← ADD THIS - important!
   indexes: [
     {
       unique: true,
-      fields: ['studentId', 'month', 'year'],
+      fields: ['student_id', 'month', 'year'],  // ← Changed from student_Id
       name: 'unique_student_month_attendance'
     }
   ]
@@ -94,15 +95,15 @@ const StudentAttendance = sequelize.define('StudentAttendance', {
 
 // Calculate percentage before saving
 StudentAttendance.beforeSave((attendance) => {
-  if (attendance.totalWorkingDays > 0) {
-    attendance.percentage = (attendance.daysPresent / attendance.totalWorkingDays) * 100;
+  if (attendance.total_working_days > 0) {  // ← Changed from totalWorkingDays
+    attendance.percentage = (attendance.days_present / attendance.total_working_days) * 100;  // ← Changed
     attendance.percentage = parseFloat(attendance.percentage.toFixed(2));
   } else {
     attendance.percentage = 0;
   }
   
   // Auto-calculate absent days
-  attendance.daysAbsent = attendance.totalWorkingDays - attendance.daysPresent;
+  attendance.days_absent = attendance.total_working_days - attendance.days_present;  // ← Changed
 });
 
 module.exports = StudentAttendance;

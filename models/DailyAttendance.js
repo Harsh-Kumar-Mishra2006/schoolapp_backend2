@@ -50,7 +50,7 @@ const DailyAttendance = sequelize.define('DailyAttendance', {
   indexes: [
     {
       unique: true,
-      fields: ['entityType', 'entityId', 'date'],
+      fields: ['entity_type', 'entity_id', 'date'],
       name: 'unique_daily_attendance'
     }
   ]

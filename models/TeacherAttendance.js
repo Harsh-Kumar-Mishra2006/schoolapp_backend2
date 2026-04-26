@@ -7,7 +7,7 @@ const TeacherAttendance = sequelize.define('TeacherAttendance', {
     primaryKey: true,
     autoIncrement: true
   },
-  teacherId: {
+  teacher_id: {  // ← Changed from teacherId
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
@@ -23,7 +23,7 @@ const TeacherAttendance = sequelize.define('TeacherAttendance', {
     type: DataTypes.STRING(100),
     allowNull: false
   },
-  teacherSchoolId: {
+  teacher_school_id: {  // ← Changed from teacherSchoolId
     type: DataTypes.STRING(20),
     allowNull: false,
     comment: 'Teacher ID from school system (e.g., TCH001)'
@@ -37,17 +37,17 @@ const TeacherAttendance = sequelize.define('TeacherAttendance', {
     type: DataTypes.INTEGER,
     allowNull: false
   },
-  totalWorkingDays: {
+  total_working_days: {  // ← Changed from totalWorkingDays
     type: DataTypes.INTEGER,
     allowNull: false,
     defaultValue: 0
   },
-  daysPresent: {
+  days_present: {  // ← Changed from daysPresent
     type: DataTypes.INTEGER,
     allowNull: false,
     defaultValue: 0
   },
-  daysAbsent: {
+  days_absent: {  // ← Changed from daysAbsent
     type: DataTypes.INTEGER,
     allowNull: false,
     defaultValue: 0
@@ -62,7 +62,7 @@ const TeacherAttendance = sequelize.define('TeacherAttendance', {
     allowNull: true,
     comment: 'Manual remark added by admin'
   },
-  addedBy: {
+  added_by: {  // ← Changed from addedBy
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
@@ -72,10 +72,11 @@ const TeacherAttendance = sequelize.define('TeacherAttendance', {
   }
 }, {
   timestamps: true,
+  underscored: true,  // ← ADD THIS - important!
   indexes: [
     {
       unique: true,
-      fields: ['teacherId', 'month', 'year'],
+      fields: ['teacher_id', 'month', 'year'],  // ← Changed from teacherId
       name: 'unique_teacher_month_attendance'
     }
   ]
@@ -83,15 +84,15 @@ const TeacherAttendance = sequelize.define('TeacherAttendance', {
 
 // Calculate percentage before saving
 TeacherAttendance.beforeSave((attendance) => {
-  if (attendance.totalWorkingDays > 0) {
-    attendance.percentage = (attendance.daysPresent / attendance.totalWorkingDays) * 100;
+  if (attendance.total_working_days > 0) {  // ← Changed
+    attendance.percentage = (attendance.days_present / attendance.total_working_days) * 100;  // ← Changed
     attendance.percentage = parseFloat(attendance.percentage.toFixed(2));
   } else {
     attendance.percentage = 0;
   }
   
   // Auto-calculate absent days
-  attendance.daysAbsent = attendance.totalWorkingDays - attendance.daysPresent;
+  attendance.days_absent = attendance.total_working_days - attendance.days_present;  // ← Changed
 });
 
 module.exports = TeacherAttendance;
