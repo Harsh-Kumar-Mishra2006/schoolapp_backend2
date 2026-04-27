@@ -1,13 +1,14 @@
 {
   "name": "backend2",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "A simple backend for a school management system using Node.js, Express, and MySQL.",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
+  "start": "node server.js",
+  "dev": "nodemon server.js"
+},
   "keywords": [],
-  "author": "",
+  "author": "Harsh",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
