@@ -8,10 +8,7 @@ const rateLimit = require('express-rate-limit');
 const { connectDB, sequelize } = require('./config/db');
 const attendanceRoutes = require('./routes/attendenceRoutes');
 const resultRoutes = require('./routes/resultRoutes');
-// Add to your server.js imports
 const feeRoutes = require('./routes/feeRoutes');
-
-// Import routes
 const authRoutes = require('./routes/authRoutes');
 
 const app = express();
@@ -34,33 +31,78 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 
-// CORS configuration
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+// ✅ IMPROVED CORS Configuration
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'https://aps-frontend-tebg.onrender.com',
+  // Add your actual frontend Render URL here (no wildcard needed)
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, postman, etc)
+    if (!origin) {
+      return callback(null, true);
+    }
+    
+    // Check if origin is allowed
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+    
+    // Allow any Render subdomain (for preview deployments)
+    if (origin.match(/https:\/\/.*\.onrender\.com$/)) {
+      return callback(null, true);
+    }
+    
+    // Log blocked origins in development
+    if (process.env.NODE_ENV === 'development') {
+      console.warn(`⚠️ CORS blocked origin: ${origin}`);
+    }
+    
+    callback(new Error(`CORS blocked: ${origin} not allowed`));
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Cookie', 'X-Requested-With'],
+  exposedHeaders: ['Set-Cookie'],
+  optionsSuccessStatus: 200
+};
+
+// Apply CORS middleware
+app.use(cors(corsOptions));
 
 // Logging
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
-// api routes
+// API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/results', resultRoutes);
 app.use('/api/fees', feeRoutes);
 
 // Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    database: sequelize.authenticate() ? 'connected' : 'disconnected'
-  });
+app.get('/health', async (req, res) => {
+  try {
+    await sequelize.authenticate();
+    res.json({
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      database: 'connected'
+    });
+  } catch (error) {
+    res.status(500).json({
+      status: 'ERROR',
+      timestamp: new Date().toISOString(),
+      database: 'disconnected',
+      error: error.message
+    });
+  }
 });
 
 // Welcome route
@@ -71,12 +113,15 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     endpoints: {
       auth: '/api/auth',
+      attendance: '/api/attendance',
+      results: '/api/results',
+      fees: '/api/fees',
       health: '/health'
     }
   });
 });
 
-// ✅ FIXED: 404 handler - NO wildcard path needed
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -105,6 +150,7 @@ const startServer = async () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📝 Environment: ${process.env.NODE_ENV}`);
       console.log(`🔗 API URL: http://localhost:${PORT}`);
+      console.log(`✅ CORS enabled for:`, allowedOrigins);
     });
   } catch (error) {
     console.error('Failed to start server:', error);
