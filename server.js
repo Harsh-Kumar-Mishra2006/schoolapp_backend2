@@ -37,6 +37,10 @@ const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:3001',
   'https://aps-frontend-tebg.onrender.com',
+  // ✅ ADD YOUR BACKEND URL (for testing)
+  'https://schoolapp-backend2.onrender.com',
+  // ✅ ADD YOUR FRONTEND RENDER URL
+  'https://aps-frontend-tebg.onrender.com',
   // Add your actual frontend Render URL here (no wildcard needed)
 ];
 
