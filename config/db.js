@@ -15,7 +15,7 @@ const sequelize = new Sequelize(
         rejectUnauthorized: false  // Required for Aiven
       }
     },
-    logging: false,
+    logging: console.log,
     pool: {
       max: 5,
       min: 0,
