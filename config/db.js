@@ -15,12 +15,6 @@ const sequelize = new Sequelize(
         rejectUnauthorized: false
       }
     },
-    pool: {
-      max: 5,
-      min: 0,
-      acquire: 30000,
-      idle: 10000
-    },
     logging: false
   }
 );
@@ -30,21 +24,18 @@ const connectDB = async () => {
     await sequelize.authenticate();
     console.log('✅ TiDB Cloud connected successfully!');
     
-    // First, disable foreign key checks
+    // Force sync to avoid UNIQUE KEY errors
+    // This drops and recreates all tables
     await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
-    
-    // Sync all models in correct order
-    // This will create missing tables without crashing
-    await sequelize.sync({ alter: true });
+    await sequelize.drop({ cascade: true });
+    console.log('✅ Dropped all existing tables');
+    await sequelize.sync({ force: true });
     console.log('✅ All models synced successfully!');
-    
-    // Re-enable foreign key checks
     await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
     
   } catch (error) {
     console.error('❌ Database error:', error);
-    // Don't exit - just log and continue
-    console.log('⚠️ Continuing despite database error...');
+    throw error;
   }
 };
 
