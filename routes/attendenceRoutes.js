@@ -4,6 +4,17 @@ const attendanceController = require('../controllers/attendenceController');
 const authMiddleware = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 
+router.post('/student/add-by-email', 
+  authMiddleware, 
+  authorize(['admin']), 
+  attendanceController.addStudentAttendanceByEmail
+);
+
+router.post('/teacher/add-by-email', 
+  authMiddleware, 
+  authorize(['admin']), 
+  attendanceController.addTeacherAttendanceByEmail
+);
 // ============= ADMIN ONLY ROUTES =============
 router.post('/student/add', 
   authMiddleware, 

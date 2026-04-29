@@ -6,6 +6,183 @@ const User = require('../models/User');
 const { sequelize } = require('../config/db');
 const { Op } = require('sequelize');
 
+// ============= ADD STUDENT ATTENDANCE BY EMAIL =============
+const addStudentAttendanceByEmail = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Only admin can add attendance records'
+      });
+    }
+
+    const { email, month, year, totalWorkingDays, daysPresent, remark } = req.body;
+
+    if (!email || !month || !year || totalWorkingDays === undefined || daysPresent === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: email, month, year, totalWorkingDays, daysPresent'
+      });
+    }
+
+    // Find user by email
+    const user = await User.findOne({
+      where: { email: email.toLowerCase(), role: 'student' }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'Student not found with this email'
+      });
+    }
+
+    const student = await Student.findOne({ where: { userId: user.id } });
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        error: 'Student profile not found'
+      });
+    }
+
+    const existingAttendance = await StudentAttendance.findOne({
+      where: {
+        student_id: student.id,
+        month,
+        year
+      }
+    });
+
+    if (existingAttendance) {
+      return res.status(400).json({
+        success: false,
+        error: `Attendance for ${month} ${year} already exists`
+      });
+    }
+
+    const attendance = await StudentAttendance.create({
+      student_id: student.id,
+      name: user.name,
+      email: user.email,
+      class: student.class,
+      roll_number: student.rollNumber,
+      section: student.section,
+      parent_email: student.parentEmail || null,
+      month,
+      year,
+      total_working_days: totalWorkingDays,
+      days_present: daysPresent,
+      remark: remark || null,
+      added_by: req.user.id
+    }, { transaction });
+
+    await transaction.commit();
+
+    res.status(201).json({
+      success: true,
+      data: attendance,
+      message: `Student attendance for ${month} ${year} added successfully`
+    });
+
+  } catch (err) {
+    await transaction.rollback();
+    console.error("Add Student Attendance by Email Error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to add student attendance: " + err.message
+    });
+  }
+};
+
+// ============= ADD TEACHER ATTENDANCE BY EMAIL =============
+const addTeacherAttendanceByEmail = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Only admin can add attendance records'
+      });
+    }
+
+    const { email, month, year, totalWorkingDays, daysPresent, remark } = req.body;
+
+    if (!email || !month || !year || totalWorkingDays === undefined || daysPresent === undefined) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields'
+      });
+    }
+
+    const user = await User.findOne({
+      where: { email: email.toLowerCase(), role: 'teacher' }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'Teacher not found with this email'
+      });
+    }
+
+    const teacher = await Teacher.findOne({ where: { userId: user.id } });
+
+    if (!teacher) {
+      return res.status(404).json({
+        success: false,
+        error: 'Teacher profile not found'
+      });
+    }
+
+    const existingAttendance = await TeacherAttendance.findOne({
+      where: {
+        teacher_id: teacher.id,
+        month,
+        year
+      }
+    });
+
+    if (existingAttendance) {
+      return res.status(400).json({
+        success: false,
+        error: `Attendance for ${month} ${year} already exists`
+      });
+    }
+
+    const attendance = await TeacherAttendance.create({
+      teacher_id: teacher.id,
+      name: user.name,
+      email: user.email,
+      teacher_school_id: teacher.teacherId,
+      month,
+      year,
+      total_working_days: totalWorkingDays,
+      days_present: daysPresent,
+      remark: remark || null,
+      added_by: req.user.id
+    }, { transaction });
+
+    await transaction.commit();
+
+    res.status(201).json({
+      success: true,
+      data: attendance,
+      message: `Teacher attendance for ${month} ${year} added successfully`
+    });
+
+  } catch (err) {
+    await transaction.rollback();
+    console.error("Add Teacher Attendance by Email Error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to add teacher attendance: " + err.message
+    });
+  }
+};
 // ============= ADD STUDENT ATTENDANCE (Admin only) =============
 const addStudentAttendance = async (req, res) => {
   const transaction = await sequelize.transaction();
@@ -480,6 +657,8 @@ const getAllStudentsAttendance = async (req, res) => {
 };
 
 module.exports = {
+  addStudentAttendanceByEmail,
+  addTeacherAttendanceByEmail,
   addStudentAttendance,
   addTeacherAttendance,
   updateStudentAttendance,
