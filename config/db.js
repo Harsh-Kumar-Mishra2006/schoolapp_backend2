@@ -1,7 +1,6 @@
 const { Sequelize } = require('sequelize');
 require('dotenv').config();
 
-// Initialize sequelize
 const sequelize = new Sequelize(
   process.env.DB_NAME || 'test',
   process.env.DB_USER || '2CPku6SX5xn3z2h.root',
@@ -26,22 +25,17 @@ const sequelize = new Sequelize(
   }
 );
 
-// Connect function
 const connectDB = async () => {
   try {
-    // Test connection
     await sequelize.authenticate();
     console.log('✅ TiDB Cloud connected successfully!');
     
-    // Disable foreign key checks
+    // First, disable foreign key checks
     await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
     
-    // Drop all tables (clean slate)
-    await sequelize.drop({ cascade: true });
-    console.log('✅ Dropped all existing tables');
-    
-    // Sync all models
-    await sequelize.sync({ force: true });
+    // Sync all models in correct order
+    // This will create missing tables without crashing
+    await sequelize.sync({ alter: true });
     console.log('✅ All models synced successfully!');
     
     // Re-enable foreign key checks
@@ -49,7 +43,8 @@ const connectDB = async () => {
     
   } catch (error) {
     console.error('❌ Database error:', error);
-    throw error;
+    // Don't exit - just log and continue
+    console.log('⚠️ Continuing despite database error...');
   }
 };
 
