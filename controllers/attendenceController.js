@@ -1,6 +1,5 @@
 const StudentAttendance = require('../models/StudentAttendance');
 const TeacherAttendance = require('../models/TeacherAttendance');
-const DailyAttendance = require('../models/DailyAttendance');
 const Student = require('../models/Student');
 const Teacher = require('../models/Teacher');
 const User = require('../models/User');
@@ -12,7 +11,6 @@ const addStudentAttendance = async (req, res) => {
   const transaction = await sequelize.transaction();
   
   try {
-    // Check if admin
     if (req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
@@ -29,7 +27,6 @@ const addStudentAttendance = async (req, res) => {
       remark
     } = req.body;
 
-    // Validation
     if (!studentId || !month || !year || totalWorkingDays === undefined || daysPresent === undefined) {
       return res.status(400).json({
         success: false,
@@ -37,7 +34,6 @@ const addStudentAttendance = async (req, res) => {
       });
     }
 
-    // Get student details
     const student = await Student.findByPk(studentId, {
       include: [{ model: User, as: 'user' }]
     });
@@ -49,10 +45,9 @@ const addStudentAttendance = async (req, res) => {
       });
     }
 
-    // Check if attendance already exists for this month
     const existingAttendance = await StudentAttendance.findOne({
       where: {
-        studentId,
+        student_id: studentId,
         month,
         year
       }
@@ -65,21 +60,20 @@ const addStudentAttendance = async (req, res) => {
       });
     }
 
-    // Create attendance record
     const attendance = await StudentAttendance.create({
-      studentId,
+      student_id: studentId,
       name: student.user.name,
       email: student.user.email,
       class: student.class,
-      rollNumber: student.rollNumber,
+      roll_number: student.rollNumber,
       section: student.section,
-      parentEmail: student.parentEmail || null,
+      parent_email: student.parentEmail || null,
       month,
       year,
-      totalWorkingDays,
-      daysPresent,
+      total_working_days: totalWorkingDays,
+      days_present: daysPresent,
       remark: remark || null,
-      addedBy: req.user.id
+      added_by: req.user.id
     }, { transaction });
 
     await transaction.commit();
@@ -128,7 +122,6 @@ const addTeacherAttendance = async (req, res) => {
       });
     }
 
-    // Get teacher details
     const teacher = await Teacher.findByPk(teacherId, {
       include: [{ model: User, as: 'user' }]
     });
@@ -140,10 +133,9 @@ const addTeacherAttendance = async (req, res) => {
       });
     }
 
-    // Check existing
     const existingAttendance = await TeacherAttendance.findOne({
       where: {
-        teacherId,
+        teacher_id: teacherId,
         month,
         year
       }
@@ -157,16 +149,16 @@ const addTeacherAttendance = async (req, res) => {
     }
 
     const attendance = await TeacherAttendance.create({
-      teacherId,
+      teacher_id: teacherId,
       name: teacher.user.name,
       email: teacher.user.email,
-      teacherSchoolId: teacher.teacherId,
+      teacher_school_id: teacher.teacherId,
       month,
       year,
-      totalWorkingDays,
-      daysPresent,
+      total_working_days: totalWorkingDays,
+      days_present: daysPresent,
       remark: remark || null,
-      addedBy: req.user.id
+      added_by: req.user.id
     }, { transaction });
 
     await transaction.commit();
@@ -212,8 +204,8 @@ const updateStudentAttendance = async (req, res) => {
     }
 
     await attendance.update({
-      totalWorkingDays: totalWorkingDays || attendance.totalWorkingDays,
-      daysPresent: daysPresent || attendance.daysPresent,
+      total_working_days: totalWorkingDays || attendance.total_working_days,
+      days_present: daysPresent || attendance.days_present,
       remark: remark || attendance.remark
     }, { transaction });
 
@@ -260,8 +252,8 @@ const updateTeacherAttendance = async (req, res) => {
     }
 
     await attendance.update({
-      totalWorkingDays: totalWorkingDays || attendance.totalWorkingDays,
-      daysPresent: daysPresent || attendance.daysPresent,
+      total_working_days: totalWorkingDays || attendance.total_working_days,
+      days_present: daysPresent || attendance.days_present,
       remark: remark || attendance.remark
     }, { transaction });
 
@@ -283,13 +275,12 @@ const updateTeacherAttendance = async (req, res) => {
   }
 };
 
-// ============= GET STUDENT ATTENDANCE (Student/Parent/Teacher authorized) =============
+// ============= GET STUDENT ATTENDANCE =============
 const getStudentAttendance = async (req, res) => {
   try {
     const { studentId } = req.params;
     const { month, year } = req.query;
 
-    // Authorization check
     const requestingUser = req.user;
     const student = await Student.findByPk(studentId, {
       include: [{ model: User, as: 'user' }]
@@ -302,9 +293,8 @@ const getStudentAttendance = async (req, res) => {
       });
     }
 
-    // Check permissions
     const isStudent = requestingUser.role === 'student' && requestingUser.id === student.userId;
-    const isParent = requestingUser.role === 'parent'; // Parent check will need additional logic
+    const isParent = requestingUser.role === 'parent';
     const isTeacher = requestingUser.role === 'teacher';
     const isAdmin = requestingUser.role === 'admin';
 
@@ -315,8 +305,7 @@ const getStudentAttendance = async (req, res) => {
       });
     }
 
-    // Build query
-    const whereClause = { studentId };
+    const whereClause = { student_id: studentId };
     if (month) whereClause.month = month;
     if (year) whereClause.year = year;
 
@@ -326,7 +315,6 @@ const getStudentAttendance = async (req, res) => {
               [sequelize.literal(`FIELD(month, 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December')`)]]
     });
 
-    // Calculate summary
     const summary = {
       totalWorkingDays: 0,
       totalPresent: 0,
@@ -335,9 +323,9 @@ const getStudentAttendance = async (req, res) => {
     };
 
     attendance.forEach(record => {
-      summary.totalWorkingDays += record.totalWorkingDays;
-      summary.totalPresent += record.daysPresent;
-      summary.totalAbsent += record.daysAbsent;
+      summary.totalWorkingDays += record.total_working_days;
+      summary.totalPresent += record.days_present;
+      summary.totalAbsent += record.days_absent;
     });
 
     if (summary.totalWorkingDays > 0) {
@@ -369,13 +357,12 @@ const getStudentAttendance = async (req, res) => {
   }
 };
 
-// ============= GET TEACHER ATTENDANCE (Teacher authorized) =============
+// ============= GET TEACHER ATTENDANCE =============
 const getTeacherAttendance = async (req, res) => {
   try {
     const { teacherId } = req.params;
     const { month, year } = req.query;
 
-    // Authorization
     const requestingUser = req.user;
     const teacher = await Teacher.findByPk(teacherId, {
       include: [{ model: User, as: 'user' }]
@@ -398,7 +385,7 @@ const getTeacherAttendance = async (req, res) => {
       });
     }
 
-    const whereClause = { teacherId };
+    const whereClause = { teacher_id: teacherId };
     if (month) whereClause.month = month;
     if (year) whereClause.year = year;
 
@@ -416,9 +403,9 @@ const getTeacherAttendance = async (req, res) => {
     };
 
     attendance.forEach(record => {
-      summary.totalWorkingDays += record.totalWorkingDays;
-      summary.totalPresent += record.daysPresent;
-      summary.totalAbsent += record.daysAbsent;
+      summary.totalWorkingDays += record.total_working_days;
+      summary.totalPresent += record.days_present;
+      summary.totalAbsent += record.days_absent;
     });
 
     if (summary.totalWorkingDays > 0) {
@@ -448,7 +435,7 @@ const getTeacherAttendance = async (req, res) => {
   }
 };
 
-// ============= GET ALL STUDENTS ATTENDANCE (Admin/Teacher) =============
+// ============= GET ALL STUDENTS ATTENDANCE =============
 const getAllStudentsAttendance = async (req, res) => {
   try {
     const { class: className, section, month, year } = req.query;
@@ -468,15 +455,12 @@ const getAllStudentsAttendance = async (req, res) => {
 
     const attendance = await StudentAttendance.findAll({
       where: whereClause,
-      include: [{
-        model: Student,
-        as: 'student',
-        attributes: ['rollNumber', 'class', 'section']
-      }],
       order: [
         ['class', 'ASC'],
         ['section', 'ASC'],
-        ['rollNumber', 'ASC']
+        ['roll_number', 'ASC'],
+        ['year', 'DESC'],
+        [sequelize.literal(`FIELD(month, 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December')`)]
       ]
     });
 
@@ -495,141 +479,6 @@ const getAllStudentsAttendance = async (req, res) => {
   }
 };
 
-// ============= MARK DAILY ATTENDANCE (Teacher/Admin) =============
-const markDailyAttendance = async (req, res) => {
-  const transaction = await sequelize.transaction();
-  
-  try {
-    const { entityType, entityId, date, status, checkInTime, checkOutTime, remark } = req.body;
-
-    if (!entityType || !entityId || !date || !status) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields: entityType, entityId, date, status'
-      });
-    }
-
-    if (!['student', 'teacher'].includes(entityType)) {
-      return res.status(400).json({
-        success: false,
-        error: 'entityType must be either "student" or "teacher"'
-      });
-    }
-
-    // Check if attendance already marked for this day
-    let attendance = await DailyAttendance.findOne({
-      where: {
-        entityType,
-        entityId,
-        date
-      }
-    });
-
-    if (attendance) {
-      // Update existing
-      await attendance.update({
-        status,
-        checkInTime,
-        checkOutTime,
-        remark,
-        markedBy: req.user.id
-      }, { transaction });
-    } else {
-      // Create new
-      attendance = await DailyAttendance.create({
-        entityType,
-        entityId,
-        date,
-        status,
-        checkInTime,
-        checkOutTime,
-        remark,
-        markedBy: req.user.id
-      }, { transaction });
-    }
-
-    await transaction.commit();
-
-    res.json({
-      success: true,
-      data: attendance,
-      message: 'Daily attendance marked successfully'
-    });
-
-  } catch (err) {
-    await transaction.rollback();
-    console.error("Mark Daily Attendance Error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to mark daily attendance"
-    });
-  }
-};
-
-// ============= GET DAILY ATTENDANCE FOR CLASS =============
-const getDailyClassAttendance = async (req, res) => {
-  try {
-    const { class: className, section, date } = req.query;
-
-    if (!className || !date) {
-      return res.status(400).json({
-        success: false,
-        error: 'Class and date are required'
-      });
-    }
-
-    // Get all students in the class
-    const students = await Student.findAll({
-      where: { class: className, section },
-      include: [{ model: User, as: 'user', attributes: ['name', 'email'] }]
-    });
-
-    // Get attendance for these students on the given date
-    const studentIds = students.map(s => s.id);
-    const dailyAttendance = await DailyAttendance.findAll({
-      where: {
-        entityType: 'student',
-        entityId: studentIds,
-        date
-      }
-    });
-
-    // Combine data
-    const attendanceData = students.map(student => {
-      const studentAttendance = dailyAttendance.find(a => a.entityId === student.id);
-      return {
-        studentId: student.id,
-        rollNumber: student.rollNumber,
-        studentName: student.user.name,
-        status: studentAttendance ? studentAttendance.status : 'not-marked',
-        checkInTime: studentAttendance ? studentAttendance.checkInTime : null,
-        checkOutTime: studentAttendance ? studentAttendance.checkOutTime : null,
-        remark: studentAttendance ? studentAttendance.remark : null
-      };
-    });
-
-    res.json({
-      success: true,
-      data: {
-        date,
-        class: className,
-        section: section || 'All',
-        totalStudents: students.length,
-        marked: dailyAttendance.length,
-        notMarked: students.length - dailyAttendance.length,
-        attendance: attendanceData
-      }
-    });
-
-  } catch (err) {
-    console.error("Get Daily Class Attendance Error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch daily attendance"
-    });
-  }
-};
-
 module.exports = {
   addStudentAttendance,
   addTeacherAttendance,
@@ -637,7 +486,5 @@ module.exports = {
   updateTeacherAttendance,
   getStudentAttendance,
   getTeacherAttendance,
-  getAllStudentsAttendance,
-  markDailyAttendance,
-  getDailyClassAttendance
+  getAllStudentsAttendance
 };

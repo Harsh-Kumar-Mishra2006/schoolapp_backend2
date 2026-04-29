@@ -36,18 +36,6 @@ router.get('/students/all',
   attendanceController.getAllStudentsAttendance
 );
 
-router.post('/daily/mark', 
-  authMiddleware, 
-  authorize(['admin', 'teacher']), 
-  attendanceController.markDailyAttendance
-);
-
-router.get('/daily/class', 
-  authMiddleware, 
-  authorize(['admin', 'teacher']), 
-  attendanceController.getDailyClassAttendance
-);
-
 // ============= STUDENT/PARENT/TEACHER ROUTES (self view) =============
 router.get('/student/:studentId', 
   authMiddleware, 
