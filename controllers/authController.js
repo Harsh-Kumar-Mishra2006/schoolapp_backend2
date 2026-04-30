@@ -84,7 +84,6 @@ const addTeacher = async (req, res) => {
   const transaction = await sequelize.transaction();
   
   try {
-    // Check if requester is admin
     if (req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
@@ -97,7 +96,6 @@ const addTeacher = async (req, res) => {
       teacherId, qualification, specialization, experience, address
     } = req.body;
 
-    // Validation
     if (!name || !email || !username || !phone || !teacherId) {
       return res.status(400).json({
         success: false,
@@ -105,7 +103,6 @@ const addTeacher = async (req, res) => {
       });
     }
 
-    // Check if user already exists
     const existingUser = await User.findOne({
       where: {
         [Op.or]: [{ email }, { username }]
@@ -119,24 +116,22 @@ const addTeacher = async (req, res) => {
       });
     }
 
-    // Generate random password
     const generatedPassword = User.generateRandomPassword();
 
-    // Create user account
     const teacherUser = await User.create({
       name,
       email,
       username,
       phone,
       password: generatedPassword,
+      tempPassword: generatedPassword, // ← ADD THIS LINE
       role: 'teacher',
       isEmailApproved: true,
       isActive: true,
       addedBy: req.user.id,
-      needsPasswordChange: true // Force password change on first login
+      needsPasswordChange: true
     }, { transaction });
 
-    // Create teacher profile
     const teacher = await Teacher.create({
       userId: teacherUser.id,
       teacherId,
@@ -160,7 +155,7 @@ const addTeacher = async (req, res) => {
           role: teacherUser.role
         },
         teacher,
-        temporaryPassword: generatedPassword // Send this to teacher
+        temporaryPassword: generatedPassword
       },
       message: `Teacher ${name} added successfully! Temporary password: ${generatedPassword}`
     });
@@ -174,7 +169,6 @@ const addTeacher = async (req, res) => {
     });
   }
 };
-
 // ============= ADMIN: ADD STUDENT =============
 const addStudent = async (req, res) => {
   const transaction = await sequelize.transaction();
@@ -193,7 +187,6 @@ const addStudent = async (req, res) => {
       fatherName, motherName, address, dateOfBirth, gender, bloodGroup
     } = req.body;
 
-    // Validation
     if (!name || !email || !username || !phone || !studentId || !rollNumber || !className || !section) {
       return res.status(400).json({
         success: false,
@@ -201,7 +194,6 @@ const addStudent = async (req, res) => {
       });
     }
 
-    // Check existing user
     const existingUser = await User.findOne({
       where: {
         [Op.or]: [{ email }, { username }]
@@ -215,16 +207,15 @@ const addStudent = async (req, res) => {
       });
     }
 
-    // Generate random password
     const generatedPassword = User.generateRandomPassword();
 
-    // Create user account
     const studentUser = await User.create({
       name,
       email,
       username,
       phone,
       password: generatedPassword,
+      tempPassword: generatedPassword, // ← ADD THIS LINE
       role: 'student',
       isEmailApproved: true,
       isActive: true,
@@ -232,7 +223,6 @@ const addStudent = async (req, res) => {
       needsPasswordChange: true
     }, { transaction });
 
-    // Create student profile
     const student = await Student.create({
       userId: studentUser.id,
       studentId,
@@ -275,7 +265,6 @@ const addStudent = async (req, res) => {
     });
   }
 };
-
 // ============= ADMIN: ADD PARENT =============
 const addParent = async (req, res) => {
   const transaction = await sequelize.transaction();
@@ -293,7 +282,6 @@ const addParent = async (req, res) => {
       occupation, address, children
     } = req.body;
 
-    // Validation
     if (!name || !email || !username || !phone) {
       return res.status(400).json({
         success: false,
@@ -301,7 +289,6 @@ const addParent = async (req, res) => {
       });
     }
 
-    // Check existing user
     const existingUser = await User.findOne({
       where: {
         [Op.or]: [{ email }, { username }]
@@ -315,16 +302,15 @@ const addParent = async (req, res) => {
       });
     }
 
-    // Generate random password
     const generatedPassword = User.generateRandomPassword();
 
-    // Create user account
     const parentUser = await User.create({
       name,
       email,
       username,
       phone,
       password: generatedPassword,
+      tempPassword: generatedPassword, // ← ADD THIS LINE
       role: 'parent',
       isEmailApproved: true,
       isActive: true,
@@ -332,12 +318,11 @@ const addParent = async (req, res) => {
       needsPasswordChange: true
     }, { transaction });
 
-    // Create parent profile
     const parent = await Parent.create({
       userId: parentUser.id,
       occupation,
       address,
-      children: children || [] // Array of student IDs
+      children: children || []
     }, { transaction });
 
     await transaction.commit();
@@ -482,7 +467,6 @@ const changePassword = async (req, res) => {
 
     const user = await User.findByPk(userId);
     
-    // Verify current password
     const isMatch = await user.comparePassword(currentPassword);
     if (!isMatch) {
       return res.status(401).json({
@@ -491,12 +475,12 @@ const changePassword = async (req, res) => {
       });
     }
 
-    // Update password
+    // Update password and clear temp password
     user.password = newPassword;
-    user.needsPasswordChange = false; // Reset the flag
+    user.tempPassword = null; // ← ADD THIS LINE
+    user.needsPasswordChange = false;
     await user.save();
 
-    // Generate new token
     const token = user.generateAuthToken();
 
     res.json({
@@ -705,9 +689,18 @@ const getAllUsers = async (req, res) => {
       order: [['createdAt', 'DESC']]
     });
 
+    // Add temporary password for users who need password change
+    const usersWithTempPass = users.map(user => {
+      const userObj = user.toJSON();
+      if (user.needsPasswordChange && user.tempPassword) {
+        userObj.temporaryPassword = user.tempPassword;
+      }
+      return userObj;
+    });
+
     res.json({
       success: true,
-      data: users
+      data: usersWithTempPass
     });
 
   } catch (err) {

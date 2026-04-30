@@ -36,6 +36,10 @@ const User = sequelize.define('User', {
     type: DataTypes.STRING(255),
     allowNull: false
   },
+  tempPassword: {  // ← ADD THIS FIELD
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
   role: {
     type: DataTypes.ENUM('admin', 'teacher', 'student', 'parent', 'principal'),
     allowNull: false,
@@ -47,7 +51,7 @@ const User = sequelize.define('User', {
   },
   isEmailApproved: {
     type: DataTypes.BOOLEAN,
-    defaultValue: true // Changed to true for admin-created users
+    defaultValue: true
   },
   lastLogin: {
     type: DataTypes.DATE
@@ -71,7 +75,7 @@ const User = sequelize.define('User', {
   },
   needsPasswordChange: {
     type: DataTypes.BOOLEAN,
-    defaultValue: true // Force password change on first login
+    defaultValue: true
   }
 }, {
   hooks: {
