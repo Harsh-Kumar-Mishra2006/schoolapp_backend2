@@ -9,6 +9,9 @@ const { connectDB, sequelize } = require('./config/db');
 const attendanceRoutes = require('./routes/attendenceRoutes');
 const feeRoutes = require('./routes/feeRoutes');
 const authRoutes = require('./routes/authRoutes');
+// Add to your server.js imports
+const resultRoutes = require('./routes/resultRoutes');
+
 
 const app = express();
 // Trust proxy for Render
@@ -86,7 +89,8 @@ if (process.env.NODE_ENV === 'development') {
 // API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/attendance', attendanceRoutes);
-app.use('/api/fees', feeRoutes);
+app.use('/api/fee', feeRoutes);
+app.use('/api/results', resultRoutes);
 
 // Health check endpoint
 app.get('/health', async (req, res) => {
@@ -117,7 +121,8 @@ app.get('/', (req, res) => {
     endpoints: {
       auth: '/api/auth',
       attendance: '/api/attendance',
-      fees: '/api/fees',
+      fees: '/api/fee',
+      results: '/api/results',
       health: '/health'
     }
   });

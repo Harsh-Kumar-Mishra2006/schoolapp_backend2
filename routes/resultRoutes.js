@@ -1,51 +1,56 @@
 const express = require('express');
 const router = express.Router();
-const feeController = require('../controllers/feeController');
+const resultController = require('../controllers/resultController');
 const authMiddleware = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 
 // ============= ADMIN ONLY ROUTES =============
-router.post('/add-by-email', 
+router.post('/create-exam', 
   authMiddleware, 
   authorize(['admin']), 
-  feeController.addFeeByEmail
+  resultController.createExam
 );
 
-router.post('/add-by-student-id', 
+router.post('/add', 
   authMiddleware, 
   authorize(['admin']), 
-  feeController.addFeeByStudentId
+  resultController.addStudentResult
 );
 
-router.put('/payment/:id', 
+router.post('/add-bulk', 
   authMiddleware, 
   authorize(['admin']), 
-  feeController.updateFeePayment
+  resultController.addBulkResults
 );
 
-router.delete('/:id', 
+router.put('/update/:id', 
   authMiddleware, 
   authorize(['admin']), 
-  feeController.deleteFeeRecord
+  resultController.updateStudentResult
 );
 
-router.get('/dashboard', 
+router.delete('/delete/:id', 
   authMiddleware, 
   authorize(['admin']), 
-  feeController.getFeeDashboard
+  resultController.deleteResult
 );
 
 // ============= ADMIN & TEACHER ROUTES =============
-router.get('/all', 
+router.get('/class-results', 
   authMiddleware, 
   authorize(['admin', 'teacher']), 
-  feeController.getAllFeeRecords
+  resultController.getClassResults
 );
 
-// ============= STUDENT/PARENT ROUTES =============
+// ============= ALL AUTHENTICATED USERS =============
+router.get('/exams', 
+  authMiddleware, 
+  resultController.getAllExams
+);
+
 router.get('/student/:studentId', 
   authMiddleware, 
-  feeController.getStudentFee
+  resultController.getStudentResult
 );
 
 module.exports = router;

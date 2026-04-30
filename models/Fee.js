@@ -1,5 +1,7 @@
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/db');
+const User = require('./User');
+const Student = require('./Student');
 
 const Fee = sequelize.define('Fee', {
   id: {
@@ -7,7 +9,7 @@ const Fee = sequelize.define('Fee', {
     primaryKey: true,
     autoIncrement: true
   },
-  studentId: {
+  student_id: {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
@@ -15,116 +17,102 @@ const Fee = sequelize.define('Fee', {
       key: 'id'
     }
   },
-  // Fee details
-  currentMonth: {
+  student_name: {
+    type: DataTypes.STRING(100),
+    allowNull: false
+  },
+  student_email: {
+    type: DataTypes.STRING(100),
+    allowNull: false
+  },
+  parent_email: {
+    type: DataTypes.STRING(100),
+    allowNull: true
+  },
+  class: {
+    type: DataTypes.STRING(20),
+    allowNull: false
+  },
+  roll_number: {
+    type: DataTypes.STRING(20),
+    allowNull: false
+  },
+  section: {
+    type: DataTypes.STRING(10),
+    allowNull: false
+  },
+  fee_month_from: {
     type: DataTypes.STRING(20),
     allowNull: false,
-    comment: 'Current month (e.g., April)'
+    comment: 'Starting month (e.g., January)'
   },
-  currentYear: {
-    type: DataTypes.INTEGER,
-    allowNull: false
-  },
-  pendingFrom: {
+  fee_month_to: {
     type: DataTypes.STRING(20),
     allowNull: false,
-    comment: 'Month from which fee is pending (e.g., January)'
+    comment: 'Ending month (e.g., December)'
   },
-  pendingFromYear: {
+  fee_year: {
     type: DataTypes.INTEGER,
     allowNull: false
   },
-  monthsPending: {
-    type: DataTypes.INTEGER,
-    allowNull: false,
-    defaultValue: 0,
-    comment: 'Number of months fee is pending'
-  },
-  // Fee components
-  monthlyFee: {
-    type: DataTypes.DECIMAL(10, 2),
-    allowNull: false,
-    defaultValue: 0
-  },
-  transportFee: {
-    type: DataTypes.DECIMAL(10, 2),
-    allowNull: false,
-    defaultValue: 0
-  },
-  examFee: {
-    type: DataTypes.DECIMAL(10, 2),
-    allowNull: false,
-    defaultValue: 0
-  },
-  tuitionFee: {
-    type: DataTypes.DECIMAL(10, 2),
-    allowNull: false,
-    defaultValue: 0
-  },
-  lateFee: {
-    type: DataTypes.DECIMAL(10, 2),
-    allowNull: false,
-    defaultValue: 0,
-    comment: 'Late fee penalty'
-  },
-  totalAmount: {
-    type: DataTypes.DECIMAL(10, 2),
-    allowNull: false,
-    defaultValue: 0
-  },
-  amountInWords: {
-    type: DataTypes.STRING(255),
-    allowNull: false
-  },
-  // Status
-  status: {
-    type: DataTypes.ENUM('Pending', 'Partially Paid', 'Paid', 'Overdue', 'Suspended'),
-    allowNull: false,
-    defaultValue: 'Pending'
-  },
-  isSuspended: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: false,
-    comment: 'Student suspended due to fee pending > 6 months'
-  },
-  suspensionDate: {
-    type: DataTypes.DATEONLY,
-    allowNull: true,
-    comment: 'Date when student was suspended'
-  },
-  suspensionReason: {
+  particulars: {
     type: DataTypes.TEXT,
-    allowNull: true,
-    comment: 'Reason for suspension'
+    allowNull: false,
+    comment: 'JSON string of fee particulars with amounts'
   },
-  // Payment tracking
-  lastPaymentDate: {
+  total_amount: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: false,
+    defaultValue: 0
+  },
+  amount_paid: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: false,
+    defaultValue: 0
+  },
+  balance_due: {
+    type: DataTypes.DECIMAL(10, 2),
+    allowNull: false,
+    defaultValue: 0
+  },
+  status: {
+    type: DataTypes.ENUM('pending', 'partial', 'paid', 'overdue'),
+    defaultValue: 'pending'
+  },
+  due_date: {
     type: DataTypes.DATEONLY,
+    allowNull: false,
+    comment: 'Last date to pay fee'
+  },
+  payment_date: {
+    type: DataTypes.DATE,
     allowNull: true
   },
-  lastPaymentAmount: {
-    type: DataTypes.DECIMAL(10, 2),
+  transaction_id: {
+    type: DataTypes.STRING(100),
+    allowNull: true,
+    comment: 'Payment transaction reference'
+  },
+  payment_mode: {
+    type: DataTypes.ENUM('cash', 'card', 'online', 'bank_transfer', 'cheque'),
     allowNull: true
   },
-  totalPaid: {
-    type: DataTypes.DECIMAL(10, 2),
-    defaultValue: 0
-  },
-  balanceAmount: {
-    type: DataTypes.DECIMAL(10, 2),
-    defaultValue: 0
-  },
-  // Additional info
   remarks: {
     type: DataTypes.TEXT,
-    allowNull: true
+    allowNull: true,
+    comment: 'Admin remarks or notes'
   },
-  dueDate: {
-    type: DataTypes.DATEONLY,
-    allowNull: false,
-    defaultValue: DataTypes.NOW
+  is_notified: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    comment: 'Whether student/parent has been notified'
   },
-  addedBy: {
+  suspension_warning_sent: {
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    comment: 'Whether suspension warning has been sent'
+  },
+  added_by: {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
@@ -132,54 +120,81 @@ const Fee = sequelize.define('Fee', {
       key: 'id'
     }
   },
-  isPublished: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: true,
-    comment: 'Whether fee details are visible to student/parent'
+  updated_by: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: 'users',
+      key: 'id'
+    }
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  underscored: true,
+  indexes: [
+    {
+      fields: ['student_id', 'fee_year'],
+      name: 'idx_student_fee_year'
+    },
+    {
+      fields: ['status'],
+      name: 'idx_fee_status'
+    },
+    {
+      fields: ['due_date'],
+      name: 'idx_due_date'
+    },
+    {
+      fields: ['student_email', 'parent_email'],
+      name: 'idx_fee_emails'
+    }
+  ]
 });
 
-// Calculate total amount and months pending before saving
-Fee.beforeSave(async (fee) => {
-  // Calculate total amount
-  fee.totalAmount = parseFloat(fee.monthlyFee || 0) + 
-                    parseFloat(fee.transportFee || 0) + 
-                    parseFloat(fee.examFee || 0) + 
-                    parseFloat(fee.tuitionFee || 0) +
-                    parseFloat(fee.lateFee || 0);
-  
-  // Calculate months pending
-  const months = ['January', 'February', 'March', 'April', 'May', 'June', 
-                  'July', 'August', 'September', 'October', 'November', 'December'];
-  
-  const pendingIndex = months.indexOf(fee.pendingFrom);
-  const currentIndex = months.indexOf(fee.currentMonth);
-  
-  let monthsDiff = currentIndex - pendingIndex;
-  if (monthsDiff < 0) {
-    monthsDiff += 12;
+// Calculate balance before saving
+Fee.beforeSave((fee) => {
+  // Parse particulars if it's a string
+  if (typeof fee.particulars === 'string') {
+    try {
+      fee.particulars = JSON.parse(fee.particulars);
+    } catch (e) {
+      // Keep as is
+    }
   }
   
-  // Add year difference
-  monthsDiff += (fee.currentYear - fee.pendingFromYear) * 12;
-  fee.monthsPending = monthsDiff;
-  
-  // Check if suspension needed (more than 6 months pending)
-  if (fee.monthsPending > 6 && fee.status !== 'Paid') {
-    fee.isSuspended = true;
-    fee.status = 'Suspended';
-    if (!fee.suspensionDate) {
-      fee.suspensionDate = new Date();
-      fee.suspensionReason = `Fee pending for ${fee.monthsPending} months (exceeds 6 months limit)`;
-    }
-  } else {
-    fee.isSuspended = false;
+  // Calculate total amount from particulars
+  if (Array.isArray(fee.particulars)) {
+    fee.total_amount = fee.particulars.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
   }
   
   // Calculate balance
-  fee.balanceAmount = fee.totalAmount - fee.totalPaid;
+  fee.balance_due = fee.total_amount - fee.amount_paid;
+  
+  // Update status based on payment
+  if (fee.balance_due <= 0) {
+    fee.status = 'paid';
+    fee.payment_date = fee.payment_date || new Date();
+  } else if (fee.amount_paid > 0) {
+    fee.status = 'partial';
+  } else {
+    // Check if overdue
+    const today = new Date();
+    const dueDate = new Date(fee.due_date);
+    if (dueDate < today) {
+      fee.status = 'overdue';
+    } else {
+      fee.status = 'pending';
+    }
+  }
+  
+  // Convert particulars back to string for storage
+  if (typeof fee.particulars === 'object') {
+    fee.particulars = JSON.stringify(fee.particulars);
+  }
 });
+
+// Relations
+Fee.belongsTo(Student, { foreignKey: 'student_id', as: 'student' });
+Student.hasMany(Fee, { foreignKey: 'student_id', as: 'fees' });
 
 module.exports = Fee;

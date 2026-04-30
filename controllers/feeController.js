@@ -1,41 +1,163 @@
 const Fee = require('../models/Fee');
-const FeePayment = require('../models/FeePayment');
 const Student = require('../models/Student');
 const User = require('../models/User');
-const Parent = require('../models/Parent');
 const { sequelize } = require('../config/db');
 const { Op } = require('sequelize');
 
-// Helper function to convert number to words
-function numberToWords(num) {
-  if (num === 0) return 'Zero';
+// ============= ADMIN: ADD FEE FOR STUDENT BY EMAIL =============
+const addFeeByEmail = async (req, res) => {
+  const transaction = await sequelize.transaction();
   
-  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine',
-                'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen',
-                'Seventeen', 'Eighteen', 'Nineteen'];
-  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-  
-  function convert(n) {
-    if (n < 20) return ones[n];
-    if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
-    if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + convert(n % 100) : '');
-    if (n < 100000) return convert(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + convert(n % 1000) : '');
-    if (n < 10000000) return convert(Math.floor(n / 100000)) + ' Lakh' + (n % 100000 ? ' ' + convert(n % 100000) : '');
-    return convert(Math.floor(n / 10000000)) + ' Crore' + (n % 10000000 ? ' ' + convert(n % 10000000) : '');
-  }
-  
-  const rupees = Math.floor(num);
-  const paise = Math.round((num - rupees) * 100);
-  
-  let result = convert(rupees) + ' Rupees';
-  if (paise > 0) {
-    result += ' and ' + convert(paise) + ' Paise';
-  }
-  return result + ' Only';
-}
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Only admin can add fee records'
+      });
+    }
 
-// ============= ADD FEE RECORD (Admin only) =============
-const addFeeRecord = async (req, res) => {
+    const {
+      email,
+      feeMonthFrom,
+      feeMonthTo,
+      feeYear,
+      particulars,
+      dueDate,
+      remarks
+    } = req.body;
+
+    // Validation
+    if (!email || !feeMonthFrom || !feeMonthTo || !feeYear || !particulars || !dueDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: email, feeMonthFrom, feeMonthTo, feeYear, particulars, dueDate'
+      });
+    }
+
+    // Validate month range (max 12 months)
+    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    const fromIndex = months.indexOf(feeMonthFrom);
+    const toIndex = months.indexOf(feeMonthTo);
+    
+    if (fromIndex === -1 || toIndex === -1) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid month names'
+      });
+    }
+    
+    const monthDifference = toIndex - fromIndex + 1;
+    if (monthDifference > 12) {
+      return res.status(400).json({
+        success: false,
+        error: 'Fee period cannot exceed 12 months. Contact admin for special approval.'
+      });
+    }
+
+    // Find student by email
+    const user = await User.findOne({
+      where: { email: email.toLowerCase(), role: 'student' }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        error: 'Student not found with this email'
+      });
+    }
+
+    const student = await Student.findOne({ 
+      where: { userId: user.id },
+      include: [{ model: User, as: 'user' }]
+    });
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        error: 'Student profile not found'
+      });
+    }
+
+    // Check if fee already exists for this period
+    const existingFee = await Fee.findOne({
+      where: {
+        student_id: student.id,
+        fee_month_from: feeMonthFrom,
+        fee_month_to: feeMonthTo,
+        fee_year: feeYear
+      }
+    });
+
+    if (existingFee) {
+      return res.status(400).json({
+        success: false,
+        error: `Fee record for ${feeMonthFrom} to ${feeMonthTo} ${feeYear} already exists`
+      });
+    }
+
+    // Calculate total amount from particulars
+    let totalAmount = 0;
+    if (Array.isArray(particulars)) {
+      totalAmount = particulars.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+    }
+
+    const fee = await Fee.create({
+      student_id: student.id,
+      student_name: user.name,
+      student_email: user.email,
+      parent_email: student.parentEmail || null,
+      class: student.class,
+      roll_number: student.rollNumber,
+      section: student.section,
+      fee_month_from: feeMonthFrom,
+      fee_month_to: feeMonthTo,
+      fee_year: feeYear,
+      particulars: JSON.stringify(particulars),
+      total_amount: totalAmount,
+      amount_paid: 0,
+      balance_due: totalAmount,
+      due_date: dueDate,
+      remarks: remarks || null,
+      added_by: req.user.id
+    }, { transaction });
+
+    await transaction.commit();
+
+    // Prepare notification data
+    const feeData = {
+      id: fee.id,
+      student_name: fee.student_name,
+      class: fee.class,
+      section: fee.section,
+      fee_month_from: fee.fee_month_from,
+      fee_month_to: fee.fee_month_to,
+      fee_year: fee.fee_year,
+      particulars: JSON.parse(fee.particulars),
+      total_amount: fee.total_amount,
+      due_date: fee.due_date,
+      status: fee.status
+    };
+
+    res.status(201).json({
+      success: true,
+      data: {
+        fee: feeData,
+        message: `Fee record added successfully for ${user.name}`
+      }
+    });
+
+  } catch (err) {
+    await transaction.rollback();
+    console.error("Add Fee Error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to add fee record: " + err.message
+    });
+  }
+};
+
+// ============= ADMIN: ADD FEE BY STUDENT ID =============
+const addFeeByStudentId = async (req, res) => {
   const transaction = await sequelize.transaction();
   
   try {
@@ -48,28 +170,21 @@ const addFeeRecord = async (req, res) => {
 
     const {
       studentId,
-      currentMonth,
-      currentYear,
-      pendingFrom,
-      pendingFromYear,
-      monthlyFee,
-      transportFee,
-      examFee,
-      tuitionFee,
-      lateFee,
-      remarks,
-      dueDate
+      feeMonthFrom,
+      feeMonthTo,
+      feeYear,
+      particulars,
+      dueDate,
+      remarks
     } = req.body;
 
-    // Validation
-    if (!studentId || !currentMonth || !currentYear || !pendingFrom || !pendingFromYear) {
+    if (!studentId || !feeMonthFrom || !feeMonthTo || !feeYear || !particulars || !dueDate) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: studentId, currentMonth, currentYear, pendingFrom, pendingFromYear'
+        error: 'Missing required fields'
       });
     }
 
-    // Check if student exists
     const student = await Student.findByPk(studentId, {
       include: [{ model: User, as: 'user' }]
     });
@@ -81,50 +196,46 @@ const addFeeRecord = async (req, res) => {
       });
     }
 
-    // Check if fee record already exists for this student and current month/year
+    // Check existing fee
     const existingFee = await Fee.findOne({
       where: {
-        studentId,
-        currentMonth,
-        currentYear
+        student_id: studentId,
+        fee_month_from: feeMonthFrom,
+        fee_month_to: feeMonthTo,
+        fee_year: feeYear
       }
     });
 
     if (existingFee) {
       return res.status(400).json({
         success: false,
-        error: `Fee record for ${currentMonth} ${currentYear} already exists. Use update endpoint instead.`
+        error: `Fee record already exists for this period`
       });
     }
 
-    // Calculate total amount
-    const totalAmount = (parseFloat(monthlyFee || 0) + 
-                        parseFloat(transportFee || 0) + 
-                        parseFloat(examFee || 0) + 
-                        parseFloat(tuitionFee || 0) +
-                        parseFloat(lateFee || 0));
+    let totalAmount = 0;
+    if (Array.isArray(particulars)) {
+      totalAmount = particulars.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+    }
 
-    // Convert to words
-    const amountInWords = numberToWords(totalAmount);
-
-    // Create fee record
     const fee = await Fee.create({
-      studentId,
-      currentMonth,
-      currentYear,
-      pendingFrom,
-      pendingFromYear,
-      monthlyFee: monthlyFee || 0,
-      transportFee: transportFee || 0,
-      examFee: examFee || 0,
-      tuitionFee: tuitionFee || 0,
-      lateFee: lateFee || 0,
-      totalAmount,
-      amountInWords,
+      student_id: studentId,
+      student_name: student.user.name,
+      student_email: student.user.email,
+      parent_email: student.parentEmail || null,
+      class: student.class,
+      roll_number: student.rollNumber,
+      section: student.section,
+      fee_month_from: feeMonthFrom,
+      fee_month_to: feeMonthTo,
+      fee_year: feeYear,
+      particulars: JSON.stringify(particulars),
+      total_amount: totalAmount,
+      amount_paid: 0,
+      balance_due: totalAmount,
+      due_date: dueDate,
       remarks: remarks || null,
-      dueDate: dueDate || new Date(),
-      addedBy: req.user.id,
-      isPublished: true
+      added_by: req.user.id
     }, { transaction });
 
     await transaction.commit();
@@ -132,42 +243,26 @@ const addFeeRecord = async (req, res) => {
     res.status(201).json({
       success: true,
       data: fee,
-      message: `Fee record for ${student.user.name} added successfully`
+      message: `Fee record added for ${student.user.name}`
     });
 
   } catch (err) {
     await transaction.rollback();
-    console.error("Add Fee Record Error:", err);
+    console.error("Add Fee by Student ID Error:", err);
     res.status(500).json({
       success: false,
-      error: "Failed to add fee record: " + err.message
+      error: "Failed to add fee record"
     });
   }
 };
 
-// ============= UPDATE FEE RECORD (Admin only) =============
-const updateFeeRecord = async (req, res) => {
+// ============= UPDATE FEE PAYMENT =============
+const updateFeePayment = async (req, res) => {
   const transaction = await sequelize.transaction();
   
   try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Only admin can update fee records'
-      });
-    }
-
     const { id } = req.params;
-    const {
-      monthlyFee,
-      transportFee,
-      examFee,
-      tuitionFee,
-      lateFee,
-      remarks,
-      dueDate,
-      isPublished
-    } = req.body;
+    const { amountPaid, paymentMode, transactionId } = req.body;
 
     const fee = await Fee.findByPk(id);
 
@@ -178,134 +273,41 @@ const updateFeeRecord = async (req, res) => {
       });
     }
 
-    const updateData = {};
-    if (monthlyFee !== undefined) updateData.monthlyFee = monthlyFee;
-    if (transportFee !== undefined) updateData.transportFee = transportFee;
-    if (examFee !== undefined) updateData.examFee = examFee;
-    if (tuitionFee !== undefined) updateData.tuitionFee = tuitionFee;
-    if (lateFee !== undefined) updateData.lateFee = lateFee;
-    if (remarks !== undefined) updateData.remarks = remarks;
-    if (dueDate !== undefined) updateData.dueDate = dueDate;
-    if (isPublished !== undefined) updateData.isPublished = isPublished;
-
-    // Recalculate total amount
-    const newTotal = (parseFloat(updateData.monthlyFee || fee.monthlyFee) +
-                     parseFloat(updateData.transportFee || fee.transportFee) +
-                     parseFloat(updateData.examFee || fee.examFee) +
-                     parseFloat(updateData.tuitionFee || fee.tuitionFee) +
-                     parseFloat(updateData.lateFee || fee.lateFee));
+    const newAmountPaid = fee.amount_paid + amountPaid;
     
-    updateData.totalAmount = newTotal;
-    updateData.amountInWords = numberToWords(newTotal);
-    updateData.balanceAmount = newTotal - fee.totalPaid;
-
-    await fee.update(updateData, { transaction });
+    await fee.update({
+      amount_paid: newAmountPaid,
+      balance_due: fee.total_amount - newAmountPaid,
+      payment_mode: paymentMode || fee.payment_mode,
+      transaction_id: transactionId || fee.transaction_id,
+      payment_date: newAmountPaid >= fee.total_amount ? new Date() : fee.payment_date,
+      updated_by: req.user.id
+    }, { transaction });
 
     await transaction.commit();
 
     res.json({
       success: true,
       data: fee,
-      message: 'Fee record updated successfully'
+      message: 'Payment updated successfully'
     });
 
   } catch (err) {
     await transaction.rollback();
-    console.error("Update Fee Record Error:", err);
+    console.error("Update Fee Payment Error:", err);
     res.status(500).json({
       success: false,
-      error: "Failed to update fee record"
+      error: "Failed to update payment"
     });
   }
 };
 
-// ============= RECORD FEE PAYMENT (Admin only) =============
-const recordPayment = async (req, res) => {
-  const transaction = await sequelize.transaction();
-  
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Only admin can record payments'
-      });
-    }
-
-    const { feeId, amountPaid, paymentMode, transactionId, remarks } = req.body;
-
-    if (!feeId || !amountPaid || !paymentMode) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields: feeId, amountPaid, paymentMode'
-      });
-    }
-
-    const fee = await Fee.findByPk(feeId);
-
-    if (!fee) {
-      return res.status(404).json({
-        success: false,
-        error: 'Fee record not found'
-      });
-    }
-
-    // Create payment record
-    const payment = await FeePayment.create({
-      feeId,
-      studentId: fee.studentId,
-      paymentDate: new Date(),
-      amountPaid,
-      paymentMode,
-      transactionId: transactionId || null,
-      receiptNumber: `RCP-${Date.now()}-${fee.studentId}`,
-      remarks: remarks || null,
-      recordedBy: req.user.id
-    }, { transaction });
-
-    // Update fee record
-    const newTotalPaid = parseFloat(fee.totalPaid) + parseFloat(amountPaid);
-    const balanceAmount = fee.totalAmount - newTotalPaid;
-    
-    let status = fee.status;
-    if (balanceAmount <= 0) {
-      status = 'Paid';
-    } else if (newTotalPaid > 0) {
-      status = 'Partially Paid';
-    }
-
-    await fee.update({
-      totalPaid: newTotalPaid,
-      balanceAmount: balanceAmount,
-      status: status,
-      lastPaymentDate: new Date(),
-      lastPaymentAmount: amountPaid
-    }, { transaction });
-
-    await transaction.commit();
-
-    res.json({
-      success: true,
-      data: { payment, fee },
-      message: `Payment of ₹${amountPaid} recorded successfully. Balance: ₹${balanceAmount}`
-    });
-
-  } catch (err) {
-    await transaction.rollback();
-    console.error("Record Payment Error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to record payment"
-    });
-  }
-};
-
-// ============= GET STUDENT FEE DETAILS (Student/Parent/Admin) =============
-const getStudentFeeDetails = async (req, res) => {
+// ============= GET STUDENT FEE (Student/Parent view) =============
+const getStudentFee = async (req, res) => {
   try {
     const { studentId } = req.params;
-    const { currentMonth, currentYear } = req.query;
+    const { status, year } = req.query;
 
-    // Authorization check
     const requestingUser = req.user;
     const student = await Student.findByPk(studentId, {
       include: [{ model: User, as: 'user' }]
@@ -318,72 +320,57 @@ const getStudentFeeDetails = async (req, res) => {
       });
     }
 
-    // Check permissions
+    // Authorization check
     const isStudent = requestingUser.role === 'student' && requestingUser.id === student.userId;
     const isParent = requestingUser.role === 'parent';
+    const isTeacher = requestingUser.role === 'teacher';
     const isAdmin = requestingUser.role === 'admin';
 
-    if (!isStudent && !isParent && !isAdmin) {
+    if (!isStudent && !isParent && !isTeacher && !isAdmin) {
       return res.status(403).json({
         success: false,
         error: 'Access denied'
       });
     }
 
-    // If parent, verify this student is their child
-    if (isParent) {
-      const parent = await Parent.findOne({ where: { userId: requestingUser.id } });
-      if (!parent || !parent.children || !parent.children.includes(studentId)) {
-        return res.status(403).json({
-          success: false,
-          error: 'Access denied. This student is not your child.'
-        });
-      }
+    // Build where clause
+    const whereClause = { student_id: studentId };
+    if (status && status !== 'all') {
+      whereClause.status = status;
     }
-
-    // Build query
-    const whereClause = { studentId, isPublished: true };
-    if (currentMonth) whereClause.currentMonth = currentMonth;
-    if (currentYear) whereClause.currentYear = currentYear;
+    if (year) {
+      whereClause.fee_year = year;
+    }
 
     const fees = await Fee.findAll({
       where: whereClause,
-      include: [
-        {
-          model: Student,
-          as: 'student',
-          include: [{ model: User, as: 'user', attributes: ['name', 'email'] }]
-        }
-      ],
-      order: [['currentYear', 'DESC'], 
-              [sequelize.literal(`FIELD(currentMonth, 'January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December')`)]]
+      order: [['fee_year', 'DESC'], ['createdAt', 'DESC']]
     });
 
-    // Get payment history for each fee
-    const feesWithPayments = [];
-    for (const fee of fees) {
-      const payments = await FeePayment.findAll({
-        where: { feeId: fee.id },
-        order: [['paymentDate', 'DESC']]
-      });
-      
-      feesWithPayments.push({
-        ...fee.toJSON(),
-        payments
-      });
-    }
+    // Parse particulars for each fee
+    const feesWithDetails = fees.map(fee => ({
+      ...fee.toJSON(),
+      particulars: typeof fee.particulars === 'string' ? JSON.parse(fee.particulars) : fee.particulars
+    }));
 
-    // Calculate summary
-    let totalPending = 0;
-    let totalPaid = 0;
-    let totalAmount = 0;
-    let pendingMonths = 0;
+    // Summary
+    const summary = {
+      total_fees: 0,
+      total_paid: 0,
+      total_due: 0,
+      pending_count: 0,
+      paid_count: 0,
+      overdue_count: 0
+    };
 
     fees.forEach(fee => {
-      totalAmount += parseFloat(fee.totalAmount);
-      totalPaid += parseFloat(fee.totalPaid);
-      totalPending += parseFloat(fee.balanceAmount);
-      if (fee.status !== 'Paid') pendingMonths += fee.monthsPending;
+      summary.total_fees += parseFloat(fee.total_amount);
+      summary.total_paid += parseFloat(fee.amount_paid);
+      summary.total_due += parseFloat(fee.balance_due);
+      
+      if (fee.status === 'pending') summary.pending_count++;
+      else if (fee.status === 'paid') summary.paid_count++;
+      else if (fee.status === 'overdue') summary.overdue_count++;
     });
 
     res.json({
@@ -394,250 +381,175 @@ const getStudentFeeDetails = async (req, res) => {
           name: student.user.name,
           rollNumber: student.rollNumber,
           class: student.class,
-          section: student.section,
-          email: student.user.email
+          section: student.section
         },
-        fees: feesWithPayments,
-        summary: {
-          totalAmountDue: totalAmount,
-          totalPaid: totalPaid,
-          totalPending: totalPending,
-          pendingMonths: pendingMonths,
-          isSuspended: fees.some(f => f.isSuspended)
-        }
+        fees: feesWithDetails,
+        summary
       }
     });
 
   } catch (err) {
-    console.error("Get Student Fee Details Error:", err);
+    console.error("Get Student Fee Error:", err);
     res.status(500).json({
       success: false,
-      error: "Failed to fetch fee details"
+      error: "Failed to fetch fee records"
     });
   }
 };
 
-// ============= GET ALL PENDING FEES (Admin only) =============
-const getAllPendingFees = async (req, res) => {
+// ============= GET ALL FEE RECORDS (Admin/Teacher) =============
+const getAllFeeRecords = async (req, res) => {
   try {
-    if (req.user.role !== 'admin') {
+    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
       return res.status(403).json({
         success: false,
-        error: 'Access denied. Admin only.'
+        error: 'Access denied'
       });
     }
 
-    const { class: className, section, status } = req.query;
+    const { class: className, section, status, month, year } = req.query;
 
-    const whereClause = { isPublished: true };
-    if (status) whereClause.status = status;
-    if (status === 'Overdue') {
-      whereClause.dueDate = { [Op.lt]: new Date() };
-      whereClause.status = { [Op.ne]: 'Paid' };
+    const whereClause = {};
+    if (className) whereClause.class = className;
+    if (section) whereClause.section = section;
+    if (status && status !== 'all') whereClause.status = status;
+    if (year) whereClause.fee_year = year;
+    if (month) {
+      whereClause[Op.or] = [
+        { fee_month_from: month },
+        { fee_month_to: month }
+      ];
     }
 
     const fees = await Fee.findAll({
       where: whereClause,
-      include: [
-        {
-          model: Student,
-          as: 'student',
-          where: className ? { class: className, ...(section && { section }) } : {},
-          include: [{ model: User, as: 'user', attributes: ['name', 'email'] }]
-        }
-      ],
-      order: [
-        ['isSuspended', 'DESC'],
-        ['monthsPending', 'DESC'],
-        ['dueDate', 'ASC']
-      ]
+      include: [{ model: Student, as: 'student' }],
+      order: [['fee_year', 'DESC'], ['createdAt', 'DESC']]
     });
 
-    // Filter out null students (in case of mismatch)
-    const validFees = fees.filter(fee => fee.student);
-
-    // Calculate statistics
-    const stats = {
-      totalPending: validFees.length,
-      totalAmount: validFees.reduce((sum, fee) => sum + parseFloat(fee.balanceAmount), 0),
-      suspended: validFees.filter(f => f.isSuspended).length,
-      overdue: validFees.filter(f => f.dueDate < new Date() && f.status !== 'Paid').length,
-      monthsTotal: validFees.reduce((sum, fee) => sum + fee.monthsPending, 0)
-    };
+    const feesWithDetails = fees.map(fee => ({
+      ...fee.toJSON(),
+      particulars: typeof fee.particulars === 'string' ? JSON.parse(fee.particulars) : fee.particulars
+    }));
 
     res.json({
       success: true,
-      data: {
-        fees: validFees,
-        statistics: stats
-      }
+      data: feesWithDetails,
+      count: fees.length
     });
 
   } catch (err) {
-    console.error("Get All Pending Fees Error:", err);
+    console.error("Get All Fee Records Error:", err);
     res.status(500).json({
       success: false,
-      error: "Failed to fetch pending fees"
+      error: "Failed to fetch fee records"
     });
   }
 };
 
-// ============= GET STUDENTS AT RISK (Pending > 3 months) =============
-const getStudentsAtRisk = async (req, res) => {
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied. Admin only.'
-      });
-    }
-
-    const fees = await Fee.findAll({
-      where: {
-        monthsPending: { [Op.gt]: 3 },
-        status: { [Op.ne]: 'Paid' },
-        isPublished: true
-      },
-      include: [
-        {
-          model: Student,
-          as: 'student',
-          include: [{ model: User, as: 'user', attributes: ['name', 'email', 'phone'] }]
-        }
-      ],
-      order: [['monthsPending', 'DESC']]
-    });
-
-    const atRisk = fees.filter(f => f.monthsPending > 3 && f.monthsPending <= 6);
-    const critical = fees.filter(f => f.monthsPending > 6);
-
-    res.json({
-      success: true,
-      data: {
-        atRisk: atRisk,
-        critical: critical,
-        summary: {
-          totalAtRisk: atRisk.length,
-          totalCritical: critical.length,
-          totalAmountAtRisk: atRisk.reduce((sum, f) => sum + parseFloat(f.balanceAmount), 0),
-          totalAmountCritical: critical.reduce((sum, f) => sum + parseFloat(f.balanceAmount), 0)
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error("Get Students At Risk Error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch at-risk students"
-    });
-  }
-};
-
-// ============= SUSPEND STUDENT (Admin only) =============
-const suspendStudent = async (req, res) => {
+// ============= DELETE FEE RECORD (Admin only) =============
+const deleteFeeRecord = async (req, res) => {
   const transaction = await sequelize.transaction();
   
   try {
     if (req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
-        error: 'Access denied. Admin only.'
+        error: 'Only admin can delete fee records'
       });
     }
 
-    const { studentId, reason } = req.body;
+    const { id } = req.params;
 
-    const fees = await Fee.findAll({
-      where: {
-        studentId,
-        isPublished: true,
-        status: { [Op.ne]: 'Paid' }
-      },
-      transaction
-    });
-
-    if (fees.length === 0) {
+    const fee = await Fee.findByPk(id);
+    
+    if (!fee) {
       return res.status(404).json({
         success: false,
-        error: 'No pending fees found for this student'
+        error: 'Fee record not found'
       });
     }
 
-    for (const fee of fees) {
-      await fee.update({
-        isSuspended: true,
-        status: 'Suspended',
-        suspensionDate: new Date(),
-        suspensionReason: reason || `Fee pending for ${fee.monthsPending} months`
-      }, { transaction });
-    }
-
-    // Update user account status
-    const student = await Student.findByPk(studentId, { transaction });
-    const user = await User.findByPk(student.userId, { transaction });
-    await user.update({ isActive: false }, { transaction });
-
+    await fee.destroy({ transaction });
     await transaction.commit();
 
     res.json({
       success: true,
-      message: `Student suspended successfully. ${fees.length} fee records updated.`
+      message: 'Fee record deleted successfully'
     });
 
   } catch (err) {
     await transaction.rollback();
-    console.error("Suspend Student Error:", err);
+    console.error("Delete Fee Record Error:", err);
     res.status(500).json({
       success: false,
-      error: "Failed to suspend student"
+      error: "Failed to delete fee record"
     });
   }
 };
 
-// ============= GET FEE PAYMENT HISTORY =============
-const getPaymentHistory = async (req, res) => {
+// ============= GET FEE SUMMARY DASHBOARD =============
+const getFeeDashboard = async (req, res) => {
   try {
-    const { studentId } = req.params;
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied'
+      });
+    }
 
-    const payments = await FeePayment.findAll({
-      where: { studentId },
-      include: [
-        {
-          model: Fee,
-          as: 'fee',
-          attributes: ['currentMonth', 'currentYear', 'totalAmount']
-        },
-        {
-          model: User,
-          as: 'recordedByUser',
-          attributes: ['name']
-        }
+    const currentYear = new Date().getFullYear();
+    
+    // Get summary by status
+    const statusSummary = await Fee.findAll({
+      where: { fee_year: currentYear },
+      attributes: [
+        'status',
+        [sequelize.fn('COUNT', sequelize.col('id')), 'count'],
+        [sequelize.fn('SUM', sequelize.col('total_amount')), 'total_amount'],
+        [sequelize.fn('SUM', sequelize.col('amount_paid')), 'total_paid'],
+        [sequelize.fn('SUM', sequelize.col('balance_due')), 'total_due']
       ],
-      order: [['paymentDate', 'DESC']]
+      group: ['status']
+    });
+
+    // Get monthly collection
+    const monthlyCollection = await Fee.findAll({
+      where: { 
+        fee_year: currentYear,
+        status: 'paid'
+      },
+      attributes: [
+        'fee_month_from',
+        [sequelize.fn('SUM', sequelize.col('amount_paid')), 'collected']
+      ],
+      group: ['fee_month_from']
     });
 
     res.json({
       success: true,
-      data: payments
+      data: {
+        status_summary: statusSummary,
+        monthly_collection: monthlyCollection,
+        current_year: currentYear
+      }
     });
 
   } catch (err) {
-    console.error("Get Payment History Error:", err);
+    console.error("Get Fee Dashboard Error:", err);
     res.status(500).json({
       success: false,
-      error: "Failed to fetch payment history"
+      error: "Failed to fetch dashboard data"
     });
   }
 };
 
 module.exports = {
-  addFeeRecord,
-  updateFeeRecord,
-  recordPayment,
-  getStudentFeeDetails,
-  getAllPendingFees,
-  getStudentsAtRisk,
-  suspendStudent,
-  getPaymentHistory
+  addFeeByEmail,
+  addFeeByStudentId,
+  updateFeePayment,
+  getStudentFee,
+  getAllFeeRecords,
+  deleteFeeRecord,
+  getFeeDashboard
 };

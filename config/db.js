@@ -24,14 +24,20 @@ const connectDB = async () => {
     await sequelize.authenticate();
     console.log('✅ TiDB Cloud connected successfully!');
     
-    // Force sync to avoid UNIQUE KEY errors
-    // This drops and recreates all tables
-    await sequelize.query('SET FOREIGN_KEY_CHECKS = 0');
-    await sequelize.drop({ cascade: true });
-    console.log('✅ Dropped all existing tables');
-    await sequelize.sync({ force: true });
-    console.log('✅ All models synced successfully!');
-    await sequelize.query('SET FOREIGN_KEY_CHECKS = 1');
+    // ✅ FIXED: Only sync tables that don't exist - NEVER drop data
+    const isProduction = process.env.NODE_ENV === 'production';
+    
+    if (isProduction) {
+      // PRODUCTION: Never drop tables, just ensure they exist
+      await sequelize.sync();
+      console.log('✅ Production mode - tables synced, all data preserved');
+    } else {
+      // DEVELOPMENT: Update schema while preserving data
+      await sequelize.sync({ alter: true });
+      console.log('✅ Development mode - schema updated, data preserved');
+    }
+    
+    console.log('✅ Database ready - data intact');
     
   } catch (error) {
     console.error('❌ Database error:', error);
