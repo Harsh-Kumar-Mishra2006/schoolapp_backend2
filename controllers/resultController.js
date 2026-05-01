@@ -4,13 +4,14 @@ const Student = require('../models/Student');
 const User = require('../models/User');
 const { sequelize } = require('../config/db');
 const { Op } = require('sequelize');
+const Parent = require('../models/Parent');
+
 
 // ============= ADD STUDENT RESULT (Admin only) =============
 const addStudentResult = async (req, res) => {
   const transaction = await sequelize.transaction();
   
   try {
-    // Check if admin
     if (req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
@@ -27,7 +28,6 @@ const addStudentResult = async (req, res) => {
       resultDate
     } = req.body;
 
-    // Validation
     if (!studentId || !examId || !subjects || !Array.isArray(subjects)) {
       return res.status(400).json({
         success: false,
@@ -35,7 +35,6 @@ const addStudentResult = async (req, res) => {
       });
     }
 
-    // Check if student exists
     const student = await Student.findByPk(studentId, {
       include: [{ model: User, as: 'user' }]
     });
@@ -47,7 +46,6 @@ const addStudentResult = async (req, res) => {
       });
     }
 
-    // Check if exam exists
     const exam = await Exam.findByPk(examId);
     if (!exam) {
       return res.status(404).json({
@@ -56,7 +54,6 @@ const addStudentResult = async (req, res) => {
       });
     }
 
-    // Check if result already exists for this student and exam
     const existingResult = await StudentResult.findOne({
       where: { studentId, examId }
     });
@@ -64,11 +61,10 @@ const addStudentResult = async (req, res) => {
     if (existingResult) {
       return res.status(400).json({
         success: false,
-        error: `Result for ${student.user.name} in ${exam.examType} already exists. Use update endpoint instead.`
+        error: `Result for ${student.user.name} in ${exam.examType} already exists.`
       });
     }
 
-    // Create result
     const result = await StudentResult.create({
       studentId,
       examId,
@@ -77,7 +73,8 @@ const addStudentResult = async (req, res) => {
       remarks: remarks || null,
       resultDate: resultDate || new Date(),
       addedBy: req.user.id,
-      isPublished: true
+      isPublished: true,
+      parentEmail: student.parentEmail || null
     }, { transaction });
 
     await transaction.commit();
@@ -94,6 +91,131 @@ const addStudentResult = async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to add result: " + err.message
+    });
+  }
+};
+
+// ============= GET STUDENT RESULT (Student/Parent Dashboard) =============
+const getStudentResult = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { examId, examType, year } = req.query;
+
+    const requestingUser = req.user;
+    const student = await Student.findByPk(studentId, {
+      include: [{ model: User, as: 'user' }]
+    });
+
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        error: 'Student not found'
+      });
+    }
+
+    // Authorization check
+    const isStudent = requestingUser.role === 'student' && requestingUser.id === student.userId;
+    const isParent = requestingUser.role === 'parent';
+    const isTeacher = requestingUser.role === 'teacher';
+    const isAdmin = requestingUser.role === 'admin';
+
+    // For parent: check if this student is their child
+    let isChildOfParent = false;
+    if (isParent) {
+      const parent = await Parent.findOne({ where: { userId: requestingUser.id } });
+      if (parent && parent.children && parent.children.includes(studentId)) {
+        isChildOfParent = true;
+      }
+    }
+
+    if (!isStudent && !isChildOfParent && !isTeacher && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied. You can only view your own results or your children\'s results.'
+      });
+    }
+
+    // Build query
+    const whereClause = { studentId, isPublished: true };
+    
+    if (examId) {
+      whereClause.examId = examId;
+    }
+    
+    if (examType || year) {
+      const examWhere = {};
+      if (examType) examWhere.examType = examType;
+      if (year) examWhere.examYear = year;
+      
+      const exams = await Exam.findAll({ where: examWhere });
+      const examIds = exams.map(e => e.id);
+      whereClause.examId = { [Op.in]: examIds };
+    }
+
+    const results = await StudentResult.findAll({
+      where: whereClause,
+      include: [
+        {
+          model: Exam,
+          as: 'exam',
+          attributes: ['id', 'examType', 'examYear', 'term', 'startDate', 'endDate']
+        },
+        {
+          model: Student,
+          as: 'student',
+          include: [{ model: User, as: 'user', attributes: ['name', 'email'] }]
+        }
+      ],
+      order: [[{ model: Exam, as: 'exam' }, 'examYear', 'DESC'], 
+              [{ model: Exam, as: 'exam' }, 'startDate', 'DESC']]
+    });
+
+    // Calculate overall performance
+    let totalObtained = 0;
+    let totalMax = 0;
+    let passedExams = 0;
+    let failedExams = 0;
+
+    results.forEach(result => {
+      totalObtained += result.totalMarksObtained;
+      totalMax += result.totalMaxMarks;
+      if (result.status === 'Pass') {
+        passedExams++;
+      } else {
+        failedExams++;
+      }
+    });
+
+    const overallPercentage = totalMax > 0 ? (totalObtained / totalMax) * 100 : 0;
+
+    res.json({
+      success: true,
+      data: {
+        student: {
+          id: student.id,
+          name: student.user.name,
+          rollNumber: student.rollNumber,
+          class: student.class,
+          section: student.section,
+          email: student.user.email
+        },
+        results,
+        summary: {
+          totalExams: results.length,
+          passedExams,
+          failedExams,
+          totalMarksObtained: totalObtained,
+          totalMaxMarks: totalMax,
+          overallPercentage: overallPercentage.toFixed(2)
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error("Get Student Result Error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch results"
     });
   }
 };
@@ -238,134 +360,6 @@ const updateStudentResult = async (req, res) => {
     res.status(500).json({
       success: false,
       error: "Failed to update result"
-    });
-  }
-};
-
-// ============= GET STUDENT RESULT (Student/Parent/Admin) =============
-const getStudentResult = async (req, res) => {
-  try {
-    const { studentId } = req.params;
-    const { examId, examType, year } = req.query;
-
-    // Authorization check
-    const requestingUser = req.user;
-    const student = await Student.findByPk(studentId, {
-      include: [{ model: User, as: 'user' }]
-    });
-
-    if (!student) {
-      return res.status(404).json({
-        success: false,
-        error: 'Student not found'
-      });
-    }
-
-    // Check permissions
-    const isStudent = requestingUser.role === 'student' && requestingUser.id === student.userId;
-    const isParent = requestingUser.role === 'parent';
-    const isTeacher = requestingUser.role === 'teacher';
-    const isAdmin = requestingUser.role === 'admin';
-
-    if (!isStudent && !isParent && !isTeacher && !isAdmin) {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied. You can only view your own results or your children\'s results.'
-      });
-    }
-
-    // If parent, verify this student is their child
-    if (isParent) {
-      const parent = await Parent.findOne({ where: { userId: requestingUser.id } });
-      if (!parent || !parent.children.includes(studentId)) {
-        return res.status(403).json({
-          success: false,
-          error: 'Access denied. This student is not your child.'
-        });
-      }
-    }
-
-    // Build query
-    const whereClause = { studentId, isPublished: true };
-    
-    if (examId) {
-      whereClause.examId = examId;
-    }
-    
-    if (examType || year) {
-      const examWhere = {};
-      if (examType) examWhere.examType = examType;
-      if (year) examWhere.examYear = year;
-      
-      const exams = await Exam.findAll({ where: examWhere });
-      const examIds = exams.map(e => e.id);
-      whereClause.examId = { [Op.in]: examIds };
-    }
-
-    const results = await StudentResult.findAll({
-      where: whereClause,
-      include: [
-        {
-          model: Exam,
-          as: 'exam',
-          attributes: ['id', 'examType', 'examYear', 'term', 'startDate', 'endDate']
-        },
-        {
-          model: Student,
-          as: 'student',
-          include: [{ model: User, as: 'user', attributes: ['name', 'email'] }]
-        }
-      ],
-      order: [[{ model: Exam, as: 'exam' }, 'examYear', 'DESC'], 
-              [{ model: Exam, as: 'exam' }, 'startDate', 'DESC']]
-    });
-
-    // Calculate overall performance
-    let totalObtained = 0;
-    let totalMax = 0;
-    let passedExams = 0;
-    let failedExams = 0;
-
-    results.forEach(result => {
-      totalObtained += result.totalMarksObtained;
-      totalMax += result.totalMaxMarks;
-      if (result.status === 'Pass') {
-        passedExams++;
-      } else {
-        failedExams++;
-      }
-    });
-
-    const overallPercentage = totalMax > 0 ? (totalObtained / totalMax) * 100 : 0;
-
-    res.json({
-      success: true,
-      data: {
-        student: {
-          id: student.id,
-          name: student.user.name,
-          rollNumber: student.rollNumber,
-          class: student.class,
-          section: student.section,
-          email: student.user.email
-        },
-        results,
-        summary: {
-          totalExams: results.length,
-          passedExams,
-          failedExams,
-          totalMarksObtained: totalObtained,
-          totalMaxMarks: totalMax,
-          overallPercentage: overallPercentage.toFixed(2)
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error("Get Student Result Error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch results"
     });
   }
 };

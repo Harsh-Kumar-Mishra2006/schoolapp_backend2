@@ -23,29 +23,10 @@ const StudentResult = sequelize.define('StudentResult', {
       key: 'id'
     }
   },
-  // Individual subjects results stored as JSON array
   subjects: {
     type: DataTypes.JSON,
     allowNull: false,
     comment: 'Array of subject objects with marks'
-    /* Example:
-    [
-      {
-        "sno": 1,
-        "subject": "Mathematics",
-        "totalMarks": 100,
-        "passingMarks": 33,
-        "scoredMarks": 85
-      },
-      {
-        "sno": 2,
-        "subject": "Science",
-        "totalMarks": 100,
-        "passingMarks": 33,
-        "scoredMarks": 78
-      }
-    ]
-    */
   },
   totalMarksObtained: {
     type: DataTypes.INTEGER,
@@ -98,6 +79,21 @@ const StudentResult = sequelize.define('StudentResult', {
     type: DataTypes.BOOLEAN,
     defaultValue: true,
     comment: 'Whether result is published to student/parent portal'
+  },
+  parentEmail: {  // ← ADD THIS FIELD
+    type: DataTypes.STRING(100),
+    allowNull: true,
+    comment: 'Parent email for notifications'
+  },
+  emailSent: {  // ← ADD THIS FIELD
+    type: DataTypes.BOOLEAN,
+    defaultValue: false,
+    comment: 'Whether email notification was sent'
+  },
+  emailSentAt: {  // ← ADD THIS FIELD
+    type: DataTypes.DATE,
+    allowNull: true,
+    comment: 'When the email notification was sent'
   }
 }, {
   timestamps: true
@@ -105,19 +101,15 @@ const StudentResult = sequelize.define('StudentResult', {
 
 // Calculate result before saving
 StudentResult.beforeSave(async (result) => {
-  // Calculate totals and percentage
   let totalObtained = 0;
   let totalMax = 0;
   let hasFailed = false;
 
   if (result.subjects && Array.isArray(result.subjects)) {
     result.subjects.forEach((subject, index) => {
-      // Add serial number
       subject.sno = index + 1;
-      
       totalObtained += parseFloat(subject.scoredMarks || 0);
       totalMax += parseFloat(subject.totalMarks || 0);
-      
       if (parseFloat(subject.scoredMarks || 0) < parseFloat(subject.passingMarks || 0)) {
         hasFailed = true;
       }
@@ -134,23 +126,14 @@ StudentResult.beforeSave(async (result) => {
     result.percentage = 0;
   }
 
-  // Determine status
   result.status = hasFailed ? 'Fail' : 'Pass';
 
-  // Determine division (only for Pass)
   if (result.status === 'Pass') {
-    if (result.percentage >= 75) {
-      result.division = 'Distinction';
-    } else if (result.percentage >= 60) {
-      result.division = 'First';
-    } else if (result.percentage >= 45) {
-      result.division = 'Second';
-    } else if (result.percentage >= 33) {
-      result.division = 'Third';
-    } else {
-      result.division = 'Fail';
-      result.status = 'Fail';
-    }
+    if (result.percentage >= 75) result.division = 'Distinction';
+    else if (result.percentage >= 60) result.division = 'First';
+    else if (result.percentage >= 45) result.division = 'Second';
+    else if (result.percentage >= 33) result.division = 'Third';
+    else result.division = 'Fail';
   } else {
     result.division = 'Fail';
   }
