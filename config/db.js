@@ -24,24 +24,14 @@ const connectDB = async () => {
     await sequelize.authenticate();
     console.log('✅ TiDB Cloud connected successfully!');
     
-    // ✅ FIXED: Only sync tables that don't exist - NEVER drop data
-    const isProduction = process.env.NODE_ENV === 'production';
-    
-    if (isProduction) {
-      // PRODUCTION: Never drop tables, just ensure they exist
-      await sequelize.sync();
-      console.log('✅ Production mode - tables synced, all data preserved');
-    } else {
-      // DEVELOPMENT: Update schema while preserving data
-      await sequelize.sync({ alter: true });
-      console.log('✅ Development mode - schema updated, data preserved');
-    }
-    
-    console.log('✅ Database ready - data intact');
+    // ⚠️ CRITICAL FIX: Just sync, no alter/force
+    await sequelize.sync();
+    console.log('✅ Models synced (no structure changes)');
     
   } catch (error) {
     console.error('❌ Database error:', error);
-    throw error;
+    // Don't throw - let the server start even if sync fails
+    console.log('⚠️ Continuing despite sync error...');
   }
 };
 
