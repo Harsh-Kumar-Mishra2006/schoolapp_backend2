@@ -11,7 +11,7 @@ const StudentResult = sequelize.define('StudentResult', {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: 'students',
+      model: 'Students',
       key: 'id'
     }
   },
@@ -19,15 +19,53 @@ const StudentResult = sequelize.define('StudentResult', {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: 'exams',
+      model: 'Exams',
       key: 'id'
     }
   },
+  // Student Details (denormalized for quick access)
+  studentName: {
+    type: DataTypes.STRING(100),
+    allowNull: false
+  },
+  studentEmail: {
+    type: DataTypes.STRING(100),
+    allowNull: false
+  },
+  studentClass: {
+    type: DataTypes.STRING(20),
+    allowNull: false
+  },
+  studentSection: {
+    type: DataTypes.STRING(10),
+    allowNull: false
+  },
+  studentRollNumber: {
+    type: DataTypes.STRING(20),
+    allowNull: false
+  },
+  parentEmail: {
+    type: DataTypes.STRING(100),
+    allowNull: true
+  },
+  // Subjects and Marks
   subjects: {
     type: DataTypes.JSON,
     allowNull: false,
     comment: 'Array of subject objects with marks'
+    /* Example:
+    [
+      {
+        "sno": 1,
+        "subject": "Mathematics",
+        "totalMarks": 100,
+        "passingMarks": 33,
+        "scoredMarks": 85
+      }
+    ]
+    */
   },
+  // Calculated fields
   totalMarksObtained: {
     type: DataTypes.INTEGER,
     allowNull: false,
@@ -59,8 +97,7 @@ const StudentResult = sequelize.define('StudentResult', {
   },
   remarks: {
     type: DataTypes.TEXT,
-    allowNull: true,
-    comment: 'Additional comments from admin'
+    allowNull: true
   },
   resultDate: {
     type: DataTypes.DATEONLY,
@@ -71,35 +108,20 @@ const StudentResult = sequelize.define('StudentResult', {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: 'users',
+      model: 'Users',
       key: 'id'
     }
   },
   isPublished: {
     type: DataTypes.BOOLEAN,
-    defaultValue: true,
-    comment: 'Whether result is published to student/parent portal'
-  },
-  parentEmail: {  // ← ADD THIS FIELD
-    type: DataTypes.STRING(100),
-    allowNull: true,
-    comment: 'Parent email for notifications'
-  },
-  emailSent: {  // ← ADD THIS FIELD
-    type: DataTypes.BOOLEAN,
-    defaultValue: false,
-    comment: 'Whether email notification was sent'
-  },
-  emailSentAt: {  // ← ADD THIS FIELD
-    type: DataTypes.DATE,
-    allowNull: true,
-    comment: 'When the email notification was sent'
+    defaultValue: true
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  tableName: 'StudentResults'
 });
 
-// Calculate result before saving
+// Hook to calculate result before saving
 StudentResult.beforeSave(async (result) => {
   let totalObtained = 0;
   let totalMax = 0;
@@ -138,5 +160,12 @@ StudentResult.beforeSave(async (result) => {
     result.division = 'Fail';
   }
 });
+
+// Add associations
+StudentResult.associate = (models) => {
+  StudentResult.belongsTo(models.Student, { foreignKey: 'studentId', as: 'student' });
+  StudentResult.belongsTo(models.Exam, { foreignKey: 'examId', as: 'exam' });
+  StudentResult.belongsTo(models.User, { foreignKey: 'addedBy', as: 'addedByUser' });
+};
 
 module.exports = StudentResult;

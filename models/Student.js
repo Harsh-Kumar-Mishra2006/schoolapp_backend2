@@ -65,4 +65,5 @@ const Student = sequelize.define('Student', {
 Student.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 User.hasOne(Student, { foreignKey: 'userId', as: 'student' });
 
+
 module.exports = Student;

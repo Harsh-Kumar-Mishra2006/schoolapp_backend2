@@ -11,10 +11,10 @@ router.post('/create-exam',
   resultController.createExam
 );
 
-router.post('/add', 
+router.post('/add-by-email', 
   authMiddleware, 
   authorize(['admin']), 
-  resultController.addStudentResult
+  resultController.addStudentResultByEmail
 );
 
 router.post('/add-bulk', 
@@ -36,6 +36,12 @@ router.delete('/delete/:id',
 );
 
 // ============= ADMIN & TEACHER ROUTES =============
+router.get('/all', 
+  authMiddleware, 
+  authorize(['admin', 'teacher']), 
+  resultController.getAllResults
+);
+
 router.get('/class-results', 
   authMiddleware, 
   authorize(['admin', 'teacher']), 

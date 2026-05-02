@@ -44,4 +44,8 @@ const Exam = sequelize.define('Exam', {
   timestamps: true
 });
 
+Exam.associate = (models) => {
+  Exam.belongsTo(models.User, { foreignKey: 'addedBy', as: 'addedByUser' });
+  Exam.hasMany(models.StudentResult, { foreignKey: 'examId', as: 'results' });
+};
 module.exports = Exam;
