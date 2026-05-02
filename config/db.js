@@ -24,14 +24,13 @@ const connectDB = async () => {
     await sequelize.authenticate();
     console.log('✅ TiDB Cloud connected successfully!');
     
-    // ⚠️ CRITICAL FIX: Just sync, no alter/force
-    await sequelize.sync();
-    console.log('✅ Models synced (no structure changes)');
+    // Sync without altering existing tables
+    await sequelize.sync({ alter: false });
+    console.log('✅ Models synced successfully');
     
   } catch (error) {
     console.error('❌ Database error:', error);
-    // Don't throw - let the server start even if sync fails
-    console.log('⚠️ Continuing despite sync error...');
+    // Don't exit - let the server try to continue
   }
 };
 
