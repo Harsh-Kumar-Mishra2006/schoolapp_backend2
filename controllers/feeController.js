@@ -18,39 +18,27 @@ const addFeeByEmail = async (req, res) => {
 
     const {
       email,
-      feeMonthFrom,
-      feeMonthTo,
-      feeYear,
-      particulars,
+      currentMonth,
+      currentYear,
+      pendingFrom,
+      pendingFromYear,
+      monthsPending,
+      monthlyFee,
+      transportFee,
+      examFee,
+      tuitionFee,
+      lateFee,
+      totalAmount,
+      amountInWords,
       dueDate,
       remarks
     } = req.body;
 
     // Validation
-    if (!email || !feeMonthFrom || !feeMonthTo || !feeYear || !particulars || !dueDate) {
+    if (!email || !currentMonth || !currentYear || !totalAmount || !dueDate) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: email, feeMonthFrom, feeMonthTo, feeYear, particulars, dueDate'
-      });
-    }
-
-    // Validate month range (max 12 months)
-    const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-    const fromIndex = months.indexOf(feeMonthFrom);
-    const toIndex = months.indexOf(feeMonthTo);
-    
-    if (fromIndex === -1 || toIndex === -1) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid month names'
-      });
-    }
-    
-    const monthDifference = toIndex - fromIndex + 1;
-    if (monthDifference > 12) {
-      return res.status(400).json({
-        success: false,
-        error: 'Fee period cannot exceed 12 months. Contact admin for special approval.'
+        error: 'Missing required fields: email, currentMonth, currentYear, totalAmount, dueDate'
       });
     }
 
@@ -67,8 +55,7 @@ const addFeeByEmail = async (req, res) => {
     }
 
     const student = await Student.findOne({ 
-      where: { userId: user.id },
-      include: [{ model: User, as: 'user' }]
+      where: { userId: user.id }
     });
 
     if (!student) {
@@ -78,72 +65,69 @@ const addFeeByEmail = async (req, res) => {
       });
     }
 
-    // Check if fee already exists for this period
+    // Check if fee already exists for this student and month/year
     const existingFee = await Fee.findOne({
       where: {
-        student_id: student.id,
-        fee_month_from: feeMonthFrom,
-        fee_month_to: feeMonthTo,
-        fee_year: feeYear
+        studentId: student.id,
+        currentMonth: currentMonth,
+        currentYear: currentYear
       }
     });
 
     if (existingFee) {
       return res.status(400).json({
         success: false,
-        error: `Fee record for ${feeMonthFrom} to ${feeMonthTo} ${feeYear} already exists`
+        error: `Fee record for ${currentMonth} ${currentYear} already exists`
       });
     }
 
-    // Calculate total amount from particulars
-    let totalAmount = 0;
-    if (Array.isArray(particulars)) {
-      totalAmount = particulars.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+    // Calculate total if not provided
+    let calculatedTotal = totalAmount;
+    if (!calculatedTotal) {
+      calculatedTotal = (parseFloat(monthlyFee) || 0) + 
+                        (parseFloat(transportFee) || 0) + 
+                        (parseFloat(examFee) || 0) + 
+                        (parseFloat(tuitionFee) || 0) + 
+                        (parseFloat(lateFee) || 0);
     }
 
     const fee = await Fee.create({
-      student_id: student.id,
-      student_name: user.name,
-      student_email: user.email,
-      parent_email: student.parentEmail || null,
-      class: student.class,
-      roll_number: student.rollNumber,
-      section: student.section,
-      fee_month_from: feeMonthFrom,
-      fee_month_to: feeMonthTo,
-      fee_year: feeYear,
-      particulars: JSON.stringify(particulars),
-      total_amount: totalAmount,
-      amount_paid: 0,
-      balance_due: totalAmount,
-      due_date: dueDate,
+      studentId: student.id,
+      currentMonth: currentMonth,
+      currentYear: currentYear,
+      pendingFrom: pendingFrom || currentMonth,
+      pendingFromYear: pendingFromYear || currentYear,
+      monthsPending: monthsPending || 1,
+      monthlyFee: monthlyFee || 0,
+      transportFee: transportFee || 0,
+      examFee: examFee || 0,
+      tuitionFee: tuitionFee || 0,
+      lateFee: lateFee || 0,
+      totalAmount: calculatedTotal,
+      amountInWords: amountInWords || '',
+      status: 'Pending',
+      dueDate: dueDate,
       remarks: remarks || null,
-      added_by: req.user.id
+      addedBy: req.user.id,
+      isPublished: true
     }, { transaction });
 
     await transaction.commit();
 
-    // Prepare notification data
-    const feeData = {
-      id: fee.id,
-      student_name: fee.student_name,
-      class: fee.class,
-      section: fee.section,
-      fee_month_from: fee.fee_month_from,
-      fee_month_to: fee.fee_month_to,
-      fee_year: fee.fee_year,
-      particulars: JSON.parse(fee.particulars),
-      total_amount: fee.total_amount,
-      due_date: fee.due_date,
-      status: fee.status
-    };
-
     res.status(201).json({
       success: true,
       data: {
-        fee: feeData,
-        message: `Fee record added successfully for ${user.name}`
-      }
+        fee: {
+          id: fee.id,
+          studentId: fee.studentId,
+          currentMonth: fee.currentMonth,
+          currentYear: fee.currentYear,
+          totalAmount: fee.totalAmount,
+          dueDate: fee.dueDate,
+          status: fee.status
+        }
+      },
+      message: `Fee record added successfully for ${user.name}`
     });
 
   } catch (err) {
@@ -156,113 +140,13 @@ const addFeeByEmail = async (req, res) => {
   }
 };
 
-// ============= ADMIN: ADD FEE BY STUDENT ID =============
-const addFeeByStudentId = async (req, res) => {
-  const transaction = await sequelize.transaction();
-  
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Only admin can add fee records'
-      });
-    }
-
-    const {
-      studentId,
-      feeMonthFrom,
-      feeMonthTo,
-      feeYear,
-      particulars,
-      dueDate,
-      remarks
-    } = req.body;
-
-    if (!studentId || !feeMonthFrom || !feeMonthTo || !feeYear || !particulars || !dueDate) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields'
-      });
-    }
-
-    const student = await Student.findByPk(studentId, {
-      include: [{ model: User, as: 'user' }]
-    });
-
-    if (!student) {
-      return res.status(404).json({
-        success: false,
-        error: 'Student not found'
-      });
-    }
-
-    // Check existing fee
-    const existingFee = await Fee.findOne({
-      where: {
-        student_id: studentId,
-        fee_month_from: feeMonthFrom,
-        fee_month_to: feeMonthTo,
-        fee_year: feeYear
-      }
-    });
-
-    if (existingFee) {
-      return res.status(400).json({
-        success: false,
-        error: `Fee record already exists for this period`
-      });
-    }
-
-    let totalAmount = 0;
-    if (Array.isArray(particulars)) {
-      totalAmount = particulars.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
-    }
-
-    const fee = await Fee.create({
-      student_id: studentId,
-      student_name: student.user.name,
-      student_email: student.user.email,
-      parent_email: student.parentEmail || null,
-      class: student.class,
-      roll_number: student.rollNumber,
-      section: student.section,
-      fee_month_from: feeMonthFrom,
-      fee_month_to: feeMonthTo,
-      fee_year: feeYear,
-      particulars: JSON.stringify(particulars),
-      total_amount: totalAmount,
-      amount_paid: 0,
-      balance_due: totalAmount,
-      due_date: dueDate,
-      remarks: remarks || null,
-      added_by: req.user.id
-    }, { transaction });
-
-    await transaction.commit();
-
-    res.status(201).json({
-      success: true,
-      data: fee,
-      message: `Fee record added for ${student.user.name}`
-    });
-
-  } catch (err) {
-    await transaction.rollback();
-    console.error("Add Fee by Student ID Error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to add fee record"
-    });
-  }
-};
-
 // ============= UPDATE FEE PAYMENT =============
 const updateFeePayment = async (req, res) => {
   const transaction = await sequelize.transaction();
   
   try {
     const { id } = req.params;
-    const { amountPaid, paymentMode, transactionId } = req.body;
+    const { lastPaymentAmount, lastPaymentDate, status, totalPaid, balanceAmount } = req.body;
 
     const fee = await Fee.findByPk(id);
 
@@ -273,15 +157,27 @@ const updateFeePayment = async (req, res) => {
       });
     }
 
-    const newAmountPaid = fee.amount_paid + amountPaid;
-    
+    const newTotalPaid = (fee.totalPaid || 0) + (lastPaymentAmount || 0);
+    const newBalanceAmount = (fee.totalAmount || 0) - newTotalPaid;
+    let newStatus = status;
+
+    if (!newStatus) {
+      if (newBalanceAmount <= 0) {
+        newStatus = 'Paid';
+      } else if (newTotalPaid > 0) {
+        newStatus = 'Partially Paid';
+      } else {
+        newStatus = 'Pending';
+      }
+    }
+
     await fee.update({
-      amount_paid: newAmountPaid,
-      balance_due: fee.total_amount - newAmountPaid,
-      payment_mode: paymentMode || fee.payment_mode,
-      transaction_id: transactionId || fee.transaction_id,
-      payment_date: newAmountPaid >= fee.total_amount ? new Date() : fee.payment_date,
-      updated_by: req.user.id
+      lastPaymentAmount: lastPaymentAmount || fee.lastPaymentAmount,
+      lastPaymentDate: lastPaymentDate || new Date(),
+      status: newStatus,
+      totalPaid: newTotalPaid,
+      balanceAmount: newBalanceAmount,
+      updatedBy: req.user.id
     }, { transaction });
 
     await transaction.commit();
@@ -323,35 +219,27 @@ const getStudentFee = async (req, res) => {
     // Authorization check
     const isStudent = requestingUser.role === 'student' && requestingUser.id === student.userId;
     const isParent = requestingUser.role === 'parent';
-    const isTeacher = requestingUser.role === 'teacher';
     const isAdmin = requestingUser.role === 'admin';
 
-    if (!isStudent && !isParent && !isTeacher && !isAdmin) {
+    if (!isStudent && !isParent && !isAdmin) {
       return res.status(403).json({
         success: false,
         error: 'Access denied'
       });
     }
 
-    // Build where clause
-    const whereClause = { student_id: studentId };
+    const whereClause = { studentId: student.id };
     if (status && status !== 'all') {
       whereClause.status = status;
     }
     if (year) {
-      whereClause.fee_year = year;
+      whereClause.currentYear = year;
     }
 
     const fees = await Fee.findAll({
       where: whereClause,
-      order: [['fee_year', 'DESC'], ['createdAt', 'DESC']]
+      order: [['currentYear', 'DESC'], ['createdAt', 'DESC']]
     });
-
-    // Parse particulars for each fee
-    const feesWithDetails = fees.map(fee => ({
-      ...fee.toJSON(),
-      particulars: typeof fee.particulars === 'string' ? JSON.parse(fee.particulars) : fee.particulars
-    }));
 
     // Summary
     const summary = {
@@ -364,13 +252,15 @@ const getStudentFee = async (req, res) => {
     };
 
     fees.forEach(fee => {
-      summary.total_fees += parseFloat(fee.total_amount);
-      summary.total_paid += parseFloat(fee.amount_paid);
-      summary.total_due += parseFloat(fee.balance_due);
+      const totalAmount = parseFloat(fee.totalAmount) || 0;
+      const totalPaid = parseFloat(fee.totalPaid) || 0;
+      summary.total_fees += totalAmount;
+      summary.total_paid += totalPaid;
+      summary.total_due += (totalAmount - totalPaid);
       
-      if (fee.status === 'pending') summary.pending_count++;
-      else if (fee.status === 'paid') summary.paid_count++;
-      else if (fee.status === 'overdue') summary.overdue_count++;
+      if (fee.status === 'Paid') summary.paid_count++;
+      else if (fee.status === 'Pending') summary.pending_count++;
+      else if (fee.status === 'Overdue') summary.overdue_count++;
     });
 
     res.json({
@@ -383,7 +273,7 @@ const getStudentFee = async (req, res) => {
           class: student.class,
           section: student.section
         },
-        fees: feesWithDetails,
+        fees,
         summary
       }
     });
@@ -397,39 +287,46 @@ const getStudentFee = async (req, res) => {
   }
 };
 
-// ============= GET ALL FEE RECORDS (Admin/Teacher) =============
+// ============= GET ALL FEE RECORDS (Admin view) =============
 const getAllFeeRecords = async (req, res) => {
   try {
-    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
+    if (req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
         error: 'Access denied'
       });
     }
 
-    const { class: className, section, status, month, year } = req.query;
+    const { status, year, month } = req.query;
 
     const whereClause = {};
-    if (className) whereClause.class = className;
-    if (section) whereClause.section = section;
     if (status && status !== 'all') whereClause.status = status;
-    if (year) whereClause.fee_year = year;
-    if (month) {
-      whereClause[Op.or] = [
-        { fee_month_from: month },
-        { fee_month_to: month }
-      ];
-    }
+    if (year) whereClause.currentYear = parseInt(year);
+    if (month) whereClause.currentMonth = month;
 
     const fees = await Fee.findAll({
       where: whereClause,
-      include: [{ model: Student, as: 'student' }],
-      order: [['fee_year', 'DESC'], ['createdAt', 'DESC']]
+      include: [{ model: Student, as: 'student', include: [{ model: User, as: 'user' }] }],
+      order: [['currentYear', 'DESC'], ['createdAt', 'DESC']]
     });
 
     const feesWithDetails = fees.map(fee => ({
-      ...fee.toJSON(),
-      particulars: typeof fee.particulars === 'string' ? JSON.parse(fee.particulars) : fee.particulars
+      id: fee.id,
+      studentName: fee.student?.user?.name || 'N/A',
+      studentEmail: fee.student?.user?.email || 'N/A',
+      class: fee.student?.class || 'N/A',
+      section: fee.student?.section || 'N/A',
+      rollNumber: fee.student?.rollNumber || 'N/A',
+      currentMonth: fee.currentMonth,
+      currentYear: fee.currentYear,
+      totalAmount: fee.totalAmount,
+      totalPaid: fee.totalPaid || 0,
+      balanceAmount: fee.balanceAmount || (fee.totalAmount - (fee.totalPaid || 0)),
+      status: fee.status,
+      dueDate: fee.dueDate,
+      lastPaymentDate: fee.lastPaymentDate,
+      lastPaymentAmount: fee.lastPaymentAmount,
+      remarks: fee.remarks
     }));
 
     res.json({
@@ -447,7 +344,7 @@ const getAllFeeRecords = async (req, res) => {
   }
 };
 
-// ============= DELETE FEE RECORD (Admin only) =============
+// ============= DELETE FEE RECORD =============
 const deleteFeeRecord = async (req, res) => {
   const transaction = await sequelize.transaction();
   
@@ -460,7 +357,6 @@ const deleteFeeRecord = async (req, res) => {
     }
 
     const { id } = req.params;
-
     const fee = await Fee.findByPk(id);
     
     if (!fee) {
@@ -500,37 +396,21 @@ const getFeeDashboard = async (req, res) => {
 
     const currentYear = new Date().getFullYear();
     
-    // Get summary by status
     const statusSummary = await Fee.findAll({
-      where: { fee_year: currentYear },
+      where: { currentYear: currentYear },
       attributes: [
         'status',
         [sequelize.fn('COUNT', sequelize.col('id')), 'count'],
-        [sequelize.fn('SUM', sequelize.col('total_amount')), 'total_amount'],
-        [sequelize.fn('SUM', sequelize.col('amount_paid')), 'total_paid'],
-        [sequelize.fn('SUM', sequelize.col('balance_due')), 'total_due']
+        [sequelize.fn('SUM', sequelize.col('totalAmount')), 'total_amount'],
+        [sequelize.fn('SUM', sequelize.col('totalPaid')), 'total_paid']
       ],
       group: ['status']
-    });
-
-    // Get monthly collection
-    const monthlyCollection = await Fee.findAll({
-      where: { 
-        fee_year: currentYear,
-        status: 'paid'
-      },
-      attributes: [
-        'fee_month_from',
-        [sequelize.fn('SUM', sequelize.col('amount_paid')), 'collected']
-      ],
-      group: ['fee_month_from']
     });
 
     res.json({
       success: true,
       data: {
         status_summary: statusSummary,
-        monthly_collection: monthlyCollection,
         current_year: currentYear
       }
     });
@@ -546,7 +426,6 @@ const getFeeDashboard = async (req, res) => {
 
 module.exports = {
   addFeeByEmail,
-  addFeeByStudentId,
   updateFeePayment,
   getStudentFee,
   getAllFeeRecords,

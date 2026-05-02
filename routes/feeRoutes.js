@@ -11,11 +11,6 @@ router.post('/add-by-email',
   feeController.addFeeByEmail
 );
 
-router.post('/add-by-student-id', 
-  authMiddleware, 
-  authorize(['admin']), 
-  feeController.addFeeByStudentId
-);
 
 router.put('/payment/:id', 
   authMiddleware, 
