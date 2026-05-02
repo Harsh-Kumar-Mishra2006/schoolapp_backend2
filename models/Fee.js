@@ -43,13 +43,11 @@ const Fee = sequelize.define('Fee', {
   },
   fee_month_from: {
     type: DataTypes.STRING(20),
-    allowNull: false,
-    comment: 'Starting month (e.g., January)'
+    allowNull: false
   },
   fee_month_to: {
     type: DataTypes.STRING(20),
-    allowNull: false,
-    comment: 'Ending month (e.g., December)'
+    allowNull: false
   },
   fee_year: {
     type: DataTypes.INTEGER,
@@ -58,7 +56,18 @@ const Fee = sequelize.define('Fee', {
   particulars: {
     type: DataTypes.TEXT,
     allowNull: false,
-    comment: 'JSON string of fee particulars with amounts'
+    get() {
+      const rawValue = this.getDataValue('particulars');
+      if (!rawValue) return [];
+      try {
+        return typeof rawValue === 'string' ? JSON.parse(rawValue) : rawValue;
+      } catch {
+        return [];
+      }
+    },
+    set(value) {
+      this.setDataValue('particulars', JSON.stringify(value));
+    }
   },
   total_amount: {
     type: DataTypes.DECIMAL(10, 2),
@@ -81,8 +90,7 @@ const Fee = sequelize.define('Fee', {
   },
   due_date: {
     type: DataTypes.DATEONLY,
-    allowNull: false,
-    comment: 'Last date to pay fee'
+    allowNull: false
   },
   payment_date: {
     type: DataTypes.DATE,
@@ -90,8 +98,7 @@ const Fee = sequelize.define('Fee', {
   },
   transaction_id: {
     type: DataTypes.STRING(100),
-    allowNull: true,
-    comment: 'Payment transaction reference'
+    allowNull: true
   },
   payment_mode: {
     type: DataTypes.ENUM('cash', 'card', 'online', 'bank_transfer', 'cheque'),
@@ -99,18 +106,15 @@ const Fee = sequelize.define('Fee', {
   },
   remarks: {
     type: DataTypes.TEXT,
-    allowNull: true,
-    comment: 'Admin remarks or notes'
+    allowNull: true
   },
   is_notified: {
     type: DataTypes.BOOLEAN,
-    defaultValue: false,
-    comment: 'Whether student/parent has been notified'
+    defaultValue: false
   },
   suspension_warning_sent: {
     type: DataTypes.BOOLEAN,
-    defaultValue: false,
-    comment: 'Whether suspension warning has been sent'
+    defaultValue: false
   },
   added_by: {
     type: DataTypes.INTEGER,
@@ -131,6 +135,59 @@ const Fee = sequelize.define('Fee', {
 }, {
   timestamps: true,
   underscored: true,
+  hooks: {
+    beforeCreate: (fee) => {
+      // Calculate total amount from particulars
+      let particulars = fee.particulars;
+      if (typeof particulars === 'string') {
+        try {
+          particulars = JSON.parse(particulars);
+        } catch(e) {
+          particulars = [];
+        }
+      }
+      
+      if (Array.isArray(particulars)) {
+        fee.total_amount = particulars.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
+      }
+      
+      // Calculate balance
+      fee.balance_due = fee.total_amount - (fee.amount_paid || 0);
+      
+      // Set status
+      const today = new Date();
+      const dueDate = new Date(fee.due_date);
+      
+      if (fee.balance_due <= 0) {
+        fee.status = 'paid';
+      } else if ((fee.amount_paid || 0) > 0) {
+        fee.status = 'partial';
+      } else if (dueDate < today) {
+        fee.status = 'overdue';
+      } else {
+        fee.status = 'pending';
+      }
+    },
+    beforeUpdate: (fee) => {
+      // Calculate balance
+      fee.balance_due = fee.total_amount - (fee.amount_paid || 0);
+      
+      // Set status
+      const today = new Date();
+      const dueDate = new Date(fee.due_date);
+      
+      if (fee.balance_due <= 0) {
+        fee.status = 'paid';
+        if (!fee.payment_date) fee.payment_date = new Date();
+      } else if ((fee.amount_paid || 0) > 0) {
+        fee.status = 'partial';
+      } else if (dueDate < today) {
+        fee.status = 'overdue';
+      } else {
+        fee.status = 'pending';
+      }
+    }
+  },
   indexes: [
     {
       fields: ['student_id', 'fee_year'],
@@ -149,48 +206,6 @@ const Fee = sequelize.define('Fee', {
       name: 'idx_fee_emails'
     }
   ]
-});
-
-// Calculate balance before saving
-Fee.beforeSave((fee) => {
-  // Parse particulars if it's a string
-  if (typeof fee.particulars === 'string') {
-    try {
-      fee.particulars = JSON.parse(fee.particulars);
-    } catch (e) {
-      // Keep as is
-    }
-  }
-  
-  // Calculate total amount from particulars
-  if (Array.isArray(fee.particulars)) {
-    fee.total_amount = fee.particulars.reduce((sum, item) => sum + (parseFloat(item.amount) || 0), 0);
-  }
-  
-  // Calculate balance
-  fee.balance_due = fee.total_amount - fee.amount_paid;
-  
-  // Update status based on payment
-  if (fee.balance_due <= 0) {
-    fee.status = 'paid';
-    fee.payment_date = fee.payment_date || new Date();
-  } else if (fee.amount_paid > 0) {
-    fee.status = 'partial';
-  } else {
-    // Check if overdue
-    const today = new Date();
-    const dueDate = new Date(fee.due_date);
-    if (dueDate < today) {
-      fee.status = 'overdue';
-    } else {
-      fee.status = 'pending';
-    }
-  }
-  
-  // Convert particulars back to string for storage
-  if (typeof fee.particulars === 'object') {
-    fee.particulars = JSON.stringify(fee.particulars);
-  }
 });
 
 // Relations
