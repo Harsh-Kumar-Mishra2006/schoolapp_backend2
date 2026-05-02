@@ -8,6 +8,14 @@ const Parent = sequelize.define('Parent', {
     primaryKey: true,
     autoIncrement: true
   },
+  userId: {  // ← ADD THIS FIELD - REQUIRED FOR RELATIONSHIP
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: {
+      model: 'Users',
+      key: 'id'
+    }
+  },
   occupation: {
     type: DataTypes.STRING(100)
   },

@@ -1,7 +1,5 @@
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/db');
-const User = require('./User');
-const Student = require('./Student');
 
 const Fee = sequelize.define('Fee', {
   id: {
@@ -11,12 +9,7 @@ const Fee = sequelize.define('Fee', {
   },
   student_id: {
     type: DataTypes.INTEGER,
-    allowNull: false,
-    // FIX: Remove references or ensure table exists first
-    // references: {
-    //   model: 'students',
-    //   key: 'id'
-    // }
+    allowNull: false
   },
   student_name: {
     type: DataTypes.STRING(100),
@@ -86,63 +79,24 @@ const Fee = sequelize.define('Fee', {
     defaultValue: 0
   },
   status: {
-    type: DataTypes.ENUM('pending', 'partial', 'paid', 'overdue'),
+    type: DataTypes.STRING(20),
     defaultValue: 'pending'
   },
   due_date: {
     type: DataTypes.DATEONLY,
     allowNull: false
   },
-  payment_date: {
-    type: DataTypes.DATE,
-    allowNull: true
-  },
-  transaction_id: {
-    type: DataTypes.STRING(100),
-    allowNull: true
-  },
-  payment_mode: {
-    type: DataTypes.ENUM('cash', 'card', 'online', 'bank_transfer', 'cheque'),
-    allowNull: true
-  },
   remarks: {
     type: DataTypes.TEXT,
     allowNull: true
   },
-  is_notified: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: false
-  },
-  suspension_warning_sent: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: false
-  },
   added_by: {
     type: DataTypes.INTEGER,
     allowNull: false
-    // FIX: Remove references or add after table exists
-    // references: {
-    //   model: 'users',
-    //   key: 'id'
-    // }
-  },
-  updated_by: {
-    type: DataTypes.INTEGER,
-    allowNull: true
-    // references: {
-    //   model: 'users',
-    //   key: 'id'
-    // }
   }
 }, {
   timestamps: true,
-  underscored: true,
-  // FIX: Remove indexes that are causing issues during initial sync
-  // Add them after table creation via migration
-  indexes: []
+  tableName: 'Fees'
 });
-
-// FIX: Add relations AFTER all models are defined (in a separate file or after sync)
-// Remove the relations from here initially
 
 module.exports = Fee;

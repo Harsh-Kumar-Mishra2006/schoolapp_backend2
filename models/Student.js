@@ -8,6 +8,14 @@ const Student = sequelize.define('Student', {
     primaryKey: true,
     autoIncrement: true
   },
+  userId: {  // ← ADD THIS FIELD - REQUIRED FOR RELATIONSHIP
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: {
+      model: 'Users',
+      key: 'id'
+    }
+  },
   studentId: {
     type: DataTypes.STRING(20),
     unique: true,
