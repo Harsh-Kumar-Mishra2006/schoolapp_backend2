@@ -184,7 +184,7 @@ const addStudent = async (req, res) => {
     const {
       name, email, username, phone,
       studentId, rollNumber, class: className, section,
-      fatherName, motherName, address, dateOfBirth, gender, bloodGroup
+      fatherName, motherName, address, dateOfBirth, gender, bloodGroup, parentEmail
     } = req.body;
 
     if (!name || !email || !username || !phone || !studentId || !rollNumber || !className || !section) {
@@ -234,7 +234,8 @@ const addStudent = async (req, res) => {
       address,
       dateOfBirth,
       gender,
-      bloodGroup
+      bloodGroup,
+      parentEmail
     }, { transaction });
 
     await transaction.commit();
@@ -248,7 +249,8 @@ const addStudent = async (req, res) => {
           email: studentUser.email,
           username: studentUser.username,
           phone: studentUser.phone,
-          role: studentUser.role
+          role: studentUser.role,
+          parentEmail: student.parentEmail // ← ADD THIS LINE TO RETURN PARENT EMAIL IN RESPONSE
         },
         student,
         temporaryPassword: generatedPassword

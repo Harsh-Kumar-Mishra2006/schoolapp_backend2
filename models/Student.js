@@ -43,9 +43,10 @@ const Student = sequelize.define('Student', {
   motherName: {
     type: DataTypes.STRING(100)
   },
-  parentEmail: {  // ← MAKE SURE THIS FIELD EXISTS
+  // models/Student.js (you already have this ✅)
+  parentEmail: {
     type: DataTypes.STRING(100),
-    allowNull: true
+    allowNull: true  // Optional but should be stored during student creation
   },
   address: {
     type: DataTypes.TEXT
