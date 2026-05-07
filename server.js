@@ -9,9 +9,7 @@ const { connectDB, sequelize } = require('./config/db');
 const attendanceRoutes = require('./routes/attendenceRoutes');
 const feeRoutes = require('./routes/feeRoutes');
 const authRoutes = require('./routes/authRoutes');
-// Add to your server.js imports
 const resultRoutes = require('./routes/resultRoutes');
-
 
 const app = express();
 // Trust proxy for Render
