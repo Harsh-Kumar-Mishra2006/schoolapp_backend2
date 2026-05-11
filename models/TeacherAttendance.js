@@ -1,6 +1,7 @@
 const { DataTypes, Op } = require('sequelize');
 const { sequelize } = require('../config/db');
 const DailyTeacherAttendance = require('./DailyTeacherAttendance');
+
 const TeacherAttendance = sequelize.define('TeacherAttendance', {
   id: {
     type: DataTypes.INTEGER,
@@ -96,7 +97,22 @@ TeacherAttendance.beforeSave((attendance) => {
 });
 
 // Static method to recalculate monthly attendance from daily records
-TeacherAttendance.recalculateFromDaily = async function(teacherId, month, year, transaction) {
+TeacherAttendance.recalculateFromDaily = async function(teacherId, month, year, transaction, addedBy = 1) {
+  // Lazy load to avoid circular dependency
+  const DailyTeacherAttendance = require('./DailyTeacherAttendance');
+  const Teacher = require('./Teacher');
+  const User = require('./User');
+  
+  // Get teacher details with user info
+  const teacher = await Teacher.findByPk(teacherId, {
+    include: [{ model: User, as: 'user' }],
+    transaction
+  });
+  
+  if (!teacher) {
+    throw new Error(`Teacher not found with id: ${teacherId}`);
+  }
+  
   // Get all daily attendance records for this teacher in the given month
   const startDate = new Date(year, new Date(Date.parse(month + " 1, " + year)).getMonth(), 1);
   const endDate = new Date(year, new Date(Date.parse(month + " 1, " + year)).getMonth() + 1, 0);
@@ -111,14 +127,13 @@ TeacherAttendance.recalculateFromDaily = async function(teacherId, month, year, 
     transaction
   });
   
-  // Calculate totals
+  // Calculate totals (REMOVED daysLate - not in model)
   const totalWorkingDays = dailyRecords.length;
   const daysPresent = dailyRecords.filter(r => r.status === 'present').length;
   const daysAbsent = dailyRecords.filter(r => r.status === 'absent').length;
-  const daysLate = dailyRecords.filter(r => r.status === 'late').length;
   const percentage = totalWorkingDays > 0 ? (daysPresent / totalWorkingDays) * 100 : 0;
   
-  // Update or create monthly record
+  // Update or create monthly record with ALL required fields
   const [monthlyAttendance, created] = await TeacherAttendance.findOrCreate({
     where: {
       teacher_id: teacherId,
@@ -127,13 +142,16 @@ TeacherAttendance.recalculateFromDaily = async function(teacherId, month, year, 
     },
     defaults: {
       teacher_id: teacherId,
+      name: teacher.user.name,                    // ✅ Required field
+      email: teacher.user.email,                  // ✅ Required field
+      teacher_school_id: teacher.teacherId,       // ✅ Required field (school's teacher ID)
       month: month,
       year: year,
       total_working_days: totalWorkingDays,
       days_present: daysPresent,
       days_absent: daysAbsent,
-      days_late: daysLate,
-      percentage: percentage
+      percentage: percentage,
+      added_by: addedBy                           // ✅ Required field
     },
     transaction
   });
@@ -143,7 +161,6 @@ TeacherAttendance.recalculateFromDaily = async function(teacherId, month, year, 
       total_working_days: totalWorkingDays,
       days_present: daysPresent,
       days_absent: daysAbsent,
-      days_late: daysLate,
       percentage: percentage
     }, { transaction });
   }

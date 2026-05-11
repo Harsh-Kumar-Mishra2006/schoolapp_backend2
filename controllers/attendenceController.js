@@ -220,7 +220,8 @@ const markTeacherAttendance = async (req, res) => {
       teacher.id, 
       month, 
       year, 
-      transaction
+      transaction,
+      req.user.id  
     );
 
     await transaction.commit();
