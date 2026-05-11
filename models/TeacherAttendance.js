@@ -1,4 +1,4 @@
-const { DataTypes } = require('sequelize');
+const { DataTypes, Op } = require('sequelize');
 const { sequelize } = require('../config/db');
 
 const TeacherAttendance = sequelize.define('TeacherAttendance', {
@@ -94,5 +94,61 @@ TeacherAttendance.beforeSave((attendance) => {
   // Auto-calculate absent days
   attendance.days_absent = attendance.total_working_days - attendance.days_present;  // ← Changed
 });
+
+// Static method to recalculate monthly attendance from daily records
+TeacherAttendance.recalculateFromDaily = async function(teacherId, month, year, transaction) {
+  // Get all daily attendance records for this teacher in the given month
+  const startDate = new Date(year, new Date(Date.parse(month + " 1, " + year)).getMonth(), 1);
+  const endDate = new Date(year, new Date(Date.parse(month + " 1, " + year)).getMonth() + 1, 0);
+  
+  const dailyRecords = await DailyTeacherAttendance.findAll({
+    where: {
+      teacher_id: teacherId,
+      date: {
+        [Op.between]: [startDate, endDate]
+      }
+    },
+    transaction
+  });
+  
+  // Calculate totals
+  const totalWorkingDays = dailyRecords.length;
+  const daysPresent = dailyRecords.filter(r => r.status === 'present').length;
+  const daysAbsent = dailyRecords.filter(r => r.status === 'absent').length;
+  const daysLate = dailyRecords.filter(r => r.status === 'late').length;
+  const percentage = totalWorkingDays > 0 ? (daysPresent / totalWorkingDays) * 100 : 0;
+  
+  // Update or create monthly record
+  const [monthlyAttendance, created] = await TeacherAttendance.findOrCreate({
+    where: {
+      teacher_id: teacherId,
+      month: month,
+      year: year
+    },
+    defaults: {
+      teacher_id: teacherId,
+      month: month,
+      year: year,
+      total_working_days: totalWorkingDays,
+      days_present: daysPresent,
+      days_absent: daysAbsent,
+      days_late: daysLate,
+      percentage: percentage
+    },
+    transaction
+  });
+  
+  if (!created) {
+    await monthlyAttendance.update({
+      total_working_days: totalWorkingDays,
+      days_present: daysPresent,
+      days_absent: daysAbsent,
+      days_late: daysLate,
+      percentage: percentage
+    }, { transaction });
+  }
+  
+  return monthlyAttendance;
+};
 
 module.exports = TeacherAttendance;
