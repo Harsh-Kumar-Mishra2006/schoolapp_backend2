@@ -10,6 +10,7 @@ const attendanceRoutes = require('./routes/attendenceRoutes');
 const feeRoutes = require('./routes/feeRoutes');
 const authRoutes = require('./routes/authRoutes');
 const resultRoutes = require('./routes/resultRoutes');
+const path = require('path');
 
 const app = express();
 // Trust proxy for Render
@@ -31,6 +32,8 @@ app.use('/api/', limiter);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
+app.use(express.static(path.join(__dirname, '../frontend/dist')));
+
 
 // ✅ IMPROVED CORS Configuration
 const allowedOrigins = [
