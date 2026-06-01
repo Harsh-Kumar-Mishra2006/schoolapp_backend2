@@ -84,7 +84,8 @@ const getAllExams = async (req, res) => {
 };
 
 // ============= ADD STUDENT RESULT BY EMAIL (Admin only) =============
-const addStudentResultByEmail = async (req, res) => {
+// NEW FUNCTION - Same pattern as markStudentAttendance
+const addStudentResultById = async (req, res) => {
   const transaction = await sequelize.transaction();
   
   try {
@@ -95,42 +96,22 @@ const addStudentResultByEmail = async (req, res) => {
       });
     }
 
-    const {
-      email,
-      examId,
-      subjects,
-      rank,
-      remarks,
-      resultDate
-    } = req.body;
+    const { studentId, examId, subjects, rank, remarks, resultDate } = req.body;
 
-    if (!email || !examId || !subjects || !Array.isArray(subjects)) {
+    if (!studentId || !examId || !subjects) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: email, examId, subjects (array)'
+        error: 'Missing required: studentId, examId, subjects'
       });
     }
 
-    // Find student by email
-    const user = await User.findOne({
-      where: { email: email.toLowerCase(), role: 'student' }
-    });
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        error: 'Student not found with this email'
-      });
-    }
-
-    const student = await Student.findOne({ 
-      where: { userId: user.id }
-    });
+    // ✅ Use helper to resolve student by ID (supports both formats)
+    const student = await resolveStudentByIdentifier(studentId, transaction);
 
     if (!student) {
       return res.status(404).json({
         success: false,
-        error: 'Student profile not found'
+        error: `Student not found with ID: ${studentId}`
       });
     }
 
@@ -144,22 +125,23 @@ const addStudentResultByEmail = async (req, res) => {
 
     // Check if result already exists
     const existingResult = await StudentResult.findOne({
-      where: { studentId: student.id, examId }
+      where: { studentId: student.id, examId },
+      transaction
     });
 
     if (existingResult) {
       return res.status(400).json({
         success: false,
-        error: `Result for ${user.name} in ${exam.examType} already exists`
+        error: `Result for ${student.user.name} in ${exam.examType} already exists`
       });
     }
 
-    // Create result with student details
+    // ✅ Create result using student's data (no email lookup)
     const result = await StudentResult.create({
       studentId: student.id,
       examId,
-      studentName: user.name,
-      studentEmail: user.email,
+      studentName: student.user.name,
+      studentEmail: student.user.email,
       studentClass: student.class,
       studentSection: student.section,
       studentRollNumber: student.rollNumber,
@@ -174,22 +156,23 @@ const addStudentResultByEmail = async (req, res) => {
 
     await transaction.commit();
 
+    // Data is now available in:
+    // 1. Student's portal (when they log in)
+    // 2. Parent's portal (if parent email matches)
+    // 3. Teacher's portal (if teacher has access)
+
     res.status(201).json({
       success: true,
       data: {
         id: result.id,
+        studentId: student.studentId,
         studentName: result.studentName,
         studentClass: result.studentClass,
-        studentSection: result.studentSection,
-        examId: result.examId,
-        totalMarksObtained: result.totalMarksObtained,
-        totalMaxMarks: result.totalMaxMarks,
         percentage: result.percentage,
         status: result.status,
-        division: result.division,
         rank: result.rank
       },
-      message: `Result for ${user.name} added successfully`
+      message: `Result for ${student.user.name} added successfully`
     });
 
   } catch (err) {
@@ -200,6 +183,30 @@ const addStudentResultByEmail = async (req, res) => {
       error: "Failed to add result: " + err.message
     });
   }
+};
+
+// Add to resultController.js (same pattern as attendanceController)
+const resolveStudentByIdentifier = async (identifier, transaction = null) => {
+  let student = null;
+  
+  // Try as database ID first
+  if (!isNaN(identifier) && identifier.toString().trim() !== '') {
+    student = await Student.findByPk(parseInt(identifier), {
+      include: [{ model: User, as: 'user' }],
+      transaction
+    });
+  }
+  
+  // Try as school ID (e.g., "STU001")
+  if (!student) {
+    student = await Student.findOne({
+      where: { studentId: identifier.toString() },
+      include: [{ model: User, as: 'user' }],
+      transaction
+    });
+  }
+  
+  return student;
 };
 
 // ============= GET STUDENT RESULT (Student/Parent Dashboard) =============
@@ -559,11 +566,12 @@ const addBulkResults = async (req, res) => {
           continue;
         }
 
-        const student = await Student.findOne({ where: { userId: user.id } });
+       const student = await resolveStudentByIdentifier(resultData.studentId, transaction);
+
         if (!student) {
-          errors.push({ email, error: 'Student profile not found' });
-          continue;
-        }
+        errors.push({ studentId: resultData.studentId, error: 'Student not found' });
+        continue;
+      }
 
         const existingResult = await StudentResult.findOne({
           where: { studentId: student.id, examId }
@@ -622,7 +630,8 @@ const addBulkResults = async (req, res) => {
 module.exports = {
   createExam,
   getAllExams,
-  addStudentResultByEmail,
+  addStudentResultById,
+  resolveStudentByIdentifier,
   getStudentResult,
   getAllResults,
   updateStudentResult,

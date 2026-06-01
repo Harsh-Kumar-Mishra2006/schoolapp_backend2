@@ -11,16 +11,18 @@ router.post('/create-exam',
   resultController.createExam
 );
 
-router.post('/add-by-email', 
+// Add result by student ID
+router.post('/add-by-id', 
   authMiddleware, 
   authorize(['admin']), 
-  resultController.addStudentResultByEmail
+  resultController.addStudentResultById
 );
 
+// Add bulk results (keep only one version)
 router.post('/add-bulk', 
   authMiddleware, 
   authorize(['admin']), 
-  resultController.addBulkResults
+  resultController.addBulkResults  // Use the existing function
 );
 
 router.put('/update/:id', 
