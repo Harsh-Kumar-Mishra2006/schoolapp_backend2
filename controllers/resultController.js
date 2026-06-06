@@ -428,16 +428,277 @@ const getClassPerformance = async (req, res) => {
   }
 };
 
+
+// Get all exams (with optional filters)
+const getAllExams = async (req, res) => {
+  try {
+    const { examYear, examType } = req.query;
+    
+    const where = {};
+    if (examYear) where.examYear = examYear;
+    if (examType) where.examType = examType;
+    
+    const exams = await Exam.findAll({
+      where,
+      order: [['examYear', 'DESC'], ['startDate', 'ASC']]
+    });
+    
+    res.json({
+      success: true,
+      data: exams,
+      count: exams.length
+    });
+  } catch (err) {
+    console.error("Get All Exams Error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch exams: " + err.message
+    });
+  }
+};
+
+// Get student results by student ID
+const getStudentResult = async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const { examType, examYear } = req.query;
+    
+    // Find student
+    const student = await resolveStudentByIdentifier(studentId);
+    if (!student) {
+      return res.status(404).json({
+        success: false,
+        error: 'Student not found'
+      });
+    }
+    
+    // Build query
+    const where = { studentId: student.id };
+    if (examType) {
+      const exam = await Exam.findOne({ where: { examType, examYear } });
+      if (exam) where.examId = exam.id;
+    }
+    
+    const results = await StudentResult.findAll({
+      where,
+      include: [{ model: Exam, as: 'exam' }],
+      order: [['resultDate', 'DESC']]
+    });
+    
+    res.json({
+      success: true,
+      data: results
+    });
+  } catch (err) {
+    console.error("Get Student Result Error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch student results: " + err.message
+    });
+  }
+};
+
+// Get all results with pagination and filters
+const getAllResults = async (req, res) => {
+  try {
+    const { page = 1, limit = 50, class: className, examType, examYear } = req.query;
+    const offset = (page - 1) * limit;
+    
+    const where = {};
+    if (className) where.studentClass = className;
+    if (examYear) {
+      const exam = await Exam.findOne({ where: { examType, examYear } });
+      if (exam) where.examId = exam.id;
+    }
+    
+    const { count, rows } = await StudentResult.findAndCountAll({
+      where,
+      include: [
+        { model: Exam, as: 'exam' },
+        { model: Student, as: 'student' }
+      ],
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+      order: [['createdAt', 'DESC']]
+    });
+    
+    res.json({
+      success: true,
+      data: rows,
+      pagination: {
+        total: count,
+        page: parseInt(page),
+        pages: Math.ceil(count / limit)
+      }
+    });
+  } catch (err) {
+    console.error("Get All Results Error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch results: " + err.message
+    });
+  }
+};
+
+// Update student result
+const updateStudentResult = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  
+  try {
+    const { id } = req.params;
+    const { subjects, rank, remarks, isPublished } = req.body;
+    
+    const result = await StudentResult.findByPk(id, { transaction });
+    if (!result) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        error: 'Result not found'
+      });
+    }
+    
+    if (subjects) result.subjects = subjects;
+    if (rank !== undefined) result.rank = rank;
+    if (remarks !== undefined) result.remarks = remarks;
+    if (isPublished !== undefined) result.isPublished = isPublished;
+    
+    await result.save({ transaction });
+    await transaction.commit();
+    
+    res.json({
+      success: true,
+      data: result,
+      message: 'Result updated successfully'
+    });
+  } catch (err) {
+    await transaction.rollback();
+    console.error("Update Result Error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to update result: " + err.message
+    });
+  }
+};
+
+// Delete result
+const deleteResult = async (req, res) => {
+  const transaction = await sequelize.transaction();
+  
+  try {
+    const { id } = req.params;
+    
+    const result = await StudentResult.findByPk(id, { transaction });
+    if (!result) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        error: 'Result not found'
+      });
+    }
+    
+    await result.destroy({ transaction });
+    await transaction.commit();
+    
+    res.json({
+      success: true,
+      message: 'Result deleted successfully'
+    });
+  } catch (err) {
+    await transaction.rollback();
+    console.error("Delete Result Error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to delete result: " + err.message
+    });
+  }
+};
+
+// Get results by class
+const getClassResults = async (req, res) => {
+  try {
+    const { class: className, section, examType, examYear } = req.query;
+    
+    if (!className || !examType || !examYear) {
+      return res.status(400).json({
+        success: false,
+        error: 'Class, exam type, and exam year are required'
+      });
+    }
+    
+    // Find the exam
+    const exam = await Exam.findOne({
+      where: { examType, examYear }
+    });
+    
+    if (!exam) {
+      return res.status(404).json({
+        success: false,
+        error: 'Exam not found'
+      });
+    }
+    
+    // Find all students in the class
+    const students = await Student.findAll({
+      where: {
+        class: className,
+        ...(section && { section })
+      },
+      include: [{ model: User, as: 'user' }]
+    });
+    
+    // Get results for these students
+    const results = await StudentResult.findAll({
+      where: {
+        studentId: students.map(s => s.id),
+        examId: exam.id
+      },
+      include: [{ model: Student, as: 'student' }]
+    });
+    
+    // Combine student info with results
+    const classResults = students.map(student => {
+      const result = results.find(r => r.studentId === student.id);
+      return {
+        student: {
+          id: student.studentId,
+          name: student.user.name,
+          rollNumber: student.rollNumber,
+          class: student.class,
+          section: student.section
+        },
+        result: result || null
+      };
+    });
+    
+    res.json({
+      success: true,
+      data: {
+        exam: { type: examType, year: examYear },
+        totalStudents: students.length,
+        resultsPublished: results.length,
+        students: classResults
+      }
+    });
+  } catch (err) {
+    console.error("Get Class Results Error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch class results: " + err.message
+    });
+  }
+};
+// Then export properly
 module.exports = {
   initializeExamsForYear,
   getAvailableExamTypes,
   addStudentResultByExamType,
   addBulkResultsByClass,
-  getStudentResult: require('./resultController').getStudentResult,
-  getAllResults: require('./resultController').getAllResults,
-  updateStudentResult: require('./resultController').updateStudentResult,
-  deleteResult: require('./resultController').deleteResult,
-  getClassResults: require('./resultController').getClassResults,
+  getStudentResult,
+  getAllResults,
+  updateStudentResult,
+  deleteResult,
+  getClassResults,
   getClassPerformance,
-  resolveStudentByIdentifier
+  resolveStudentByIdentifier,
+  getAllExams
 };
