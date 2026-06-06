@@ -1,5 +1,7 @@
+// models/Exam.js
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/db');
+const { EXAM_TYPES, EXAM_TERMS, EXAM_SCHEDULE } = require('../utils/examsConfig');
 
 const Exam = sequelize.define('Exam', {
   id: {
@@ -8,17 +10,16 @@ const Exam = sequelize.define('Exam', {
     autoIncrement: true
   },
   examType: {
-    type: DataTypes.STRING(100),
-    allowNull: false,
-    comment: 'e.g., Quarterly, Half-Yearly, Annual, Pre-board, Unit Test'
+    type: DataTypes.ENUM(Object.values(EXAM_TYPES)),
+    allowNull: false
   },
   examYear: {
     type: DataTypes.INTEGER,
     allowNull: false
   },
   term: {
-    type: DataTypes.STRING(20),
-    comment: 'Term 1, Term 2, etc.'
+    type: DataTypes.ENUM(Object.values(EXAM_TERMS)),
+    allowNull: true
   },
   startDate: {
     type: DataTypes.DATEONLY,
@@ -28,6 +29,11 @@ const Exam = sequelize.define('Exam', {
     type: DataTypes.DATEONLY,
     allowNull: false
   },
+  weightage: {
+    type: DataTypes.INTEGER,
+    defaultValue: 0,
+    comment: 'Weightage percentage for final calculation'
+  },
   description: {
     type: DataTypes.TEXT,
     allowNull: true
@@ -36,16 +42,57 @@ const Exam = sequelize.define('Exam', {
     type: DataTypes.INTEGER,
     allowNull: false,
     references: {
-      model: 'users',
+      model: 'Users',
       key: 'id'
     }
   }
 }, {
-  timestamps: true
+  timestamps: true,
+  tableName: 'Exams'
 });
 
-Exam.associate = (models) => {
-  Exam.belongsTo(models.User, { foreignKey: 'addedBy', as: 'addedByUser' });
-  Exam.hasMany(models.StudentResult, { foreignKey: 'examId', as: 'results' });
+// Initialize exams for a new academic year
+Exam.initializeExamsForYear = async (year, addedBy = 1) => {
+  const created = [];
+  const errors = [];
+
+  for (const [examType, schedule] of Object.entries(EXAM_SCHEDULE)) {
+    try {
+      // Calculate start and end dates for the exam (simplified)
+      const startDate = new Date(year, getMonthNumber(schedule.month), 1);
+      const endDate = new Date(year, getMonthNumber(schedule.month) + 1, 0);
+      
+      const [exam, created_flag] = await Exam.findOrCreate({
+        where: { examType, examYear: year },
+        defaults: {
+          examType,
+          examYear: year,
+          term: schedule.term,
+          startDate,
+          endDate,
+          weightage: schedule.weightage,
+          description: `${examType} for academic year ${year}`,
+          addedBy
+        }
+      });
+      
+      if (created_flag) {
+        created.push(exam);
+      }
+    } catch (err) {
+      errors.push({ examType, error: err.message });
+    }
+  }
+  
+  return { created, errors };
 };
+
+function getMonthNumber(monthName) {
+  const months = {
+    'July': 6, 'August': 7, 'September': 8, 'November': 10,
+    'December': 11, 'February': 1, 'March': 2
+  };
+  return months[monthName] || 0;
+}
+
 module.exports = Exam;

@@ -1,64 +1,76 @@
+// routes/resultRoutes.js
 const express = require('express');
 const router = express.Router();
 const resultController = require('../controllers/resultController');
 const authMiddleware = require('../middlewares/authMiddleware');
 const { authorize } = require('../middlewares/roleMiddleware');
 
-// ============= ADMIN ONLY ROUTES =============
-router.post('/create-exam', 
-  authMiddleware, 
-  authorize(['admin']), 
-  resultController.createExam
+// ============= INITIALIZATION ROUTES =============
+router.post('/initialize-exams',
+  authMiddleware,
+  authorize(['admin']),
+  resultController.initializeExamsForYear
 );
 
-// Add result by student ID
-router.post('/add-by-id', 
-  authMiddleware, 
-  authorize(['admin']), 
-  resultController.addStudentResultById
+router.get('/exam-types',
+  authMiddleware,
+  resultController.getAvailableExamTypes
 );
 
-// Add bulk results (keep only one version)
-router.post('/add-bulk', 
-  authMiddleware, 
-  authorize(['admin']), 
-  resultController.addBulkResults  // Use the existing function
+// ============= ADD RESULTS BY EXAM TYPE =============
+router.post('/add-by-exam-type',
+  authMiddleware,
+  authorize(['admin']),
+  resultController.addStudentResultByExamType
 );
 
-router.put('/update/:id', 
-  authMiddleware, 
-  authorize(['admin']), 
-  resultController.updateStudentResult
+router.post('/add-bulk-by-class',
+  authMiddleware,
+  authorize(['admin']),
+  resultController.addBulkResultsByClass
 );
 
-router.delete('/delete/:id', 
-  authMiddleware, 
-  authorize(['admin']), 
-  resultController.deleteResult
+// ============= VIEW RESULTS =============
+router.get('/student/:studentId',
+  authMiddleware,
+  resultController.getStudentResult
 );
 
-// ============= ADMIN & TEACHER ROUTES =============
-router.get('/all', 
-  authMiddleware, 
-  authorize(['admin', 'teacher']), 
-  resultController.getAllResults
+router.get('/class-performance',
+  authMiddleware,
+  authorize(['admin', 'teacher']),
+  resultController.getClassPerformance
 );
 
-router.get('/class-results', 
-  authMiddleware, 
-  authorize(['admin', 'teacher']), 
+router.get('/class-results',
+  authMiddleware,
+  authorize(['admin', 'teacher']),
   resultController.getClassResults
 );
 
-// ============= ALL AUTHENTICATED USERS =============
-router.get('/exams', 
-  authMiddleware, 
-  resultController.getAllExams
+router.get('/all',
+  authMiddleware,
+  authorize(['admin', 'teacher']),
+  resultController.getAllResults
 );
 
-router.get('/student/:studentId', 
-  authMiddleware, 
-  resultController.getStudentResult
+// ============= UPDATE/DELETE =============
+router.put('/update/:id',
+  authMiddleware,
+  authorize(['admin']),
+  resultController.updateStudentResult
+);
+
+router.delete('/delete/:id',
+  authMiddleware,
+  authorize(['admin']),
+  resultController.deleteResult
+);
+
+// ============= EXAMS ROUTES =============
+router.get('/exams',
+  authMiddleware,
+  resultController.getAllExams  // Make sure this function exists
 );
 
 module.exports = router;

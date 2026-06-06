@@ -1,3 +1,4 @@
+// controllers/resultController.js (Updated version)
 const StudentResult = require('../models/StudentResult');
 const Exam = require('../models/Exam');
 const Student = require('../models/Student');
@@ -5,87 +6,83 @@ const User = require('../models/User');
 const Parent = require('../models/Parent');
 const { sequelize } = require('../config/db');
 const { Op } = require('sequelize');
+const { EXAM_TYPES, getSubjectsForClass } = require('../utils/examsConfig');
 
-// ============= CREATE EXAM (Admin only) =============
-const createExam = async (req, res) => {
+// Helper function to resolve student by identifier
+const resolveStudentByIdentifier = async (identifier, transaction = null) => {
+  let student = null;
+  
+  if (!isNaN(identifier) && identifier.toString().trim() !== '') {
+    student = await Student.findByPk(parseInt(identifier), {
+      include: [{ model: User, as: 'user' }],
+      transaction
+    });
+  }
+  
+  if (!student) {
+    student = await Student.findOne({
+      where: { studentId: identifier.toString() },
+      include: [{ model: User, as: 'user' }],
+      transaction
+    });
+  }
+  
+  return student;
+};
+
+// Initialize exams for the year (Admin only)
+const initializeExamsForYear = async (req, res) => {
   try {
     if (req.user.role !== 'admin') {
       return res.status(403).json({
         success: false,
-        error: 'Only admin can create exams'
+        error: 'Only admin can initialize exams'
       });
     }
 
-    const { examType, examYear, term, startDate, endDate, description } = req.body;
-
-    if (!examType || !examYear || !startDate || !endDate) {
+    const { year } = req.body;
+    if (!year) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: examType, examYear, startDate, endDate'
+        error: 'Year is required'
       });
     }
 
-    const exam = await Exam.create({
-      examType,
-      examYear,
-      term,
-      startDate,
-      endDate,
-      description,
-      addedBy: req.user.id
-    });
-
-    res.status(201).json({
+    const result = await Exam.initializeExamsForYear(year, req.user.id);
+    
+    res.json({
       success: true,
-      data: exam,
-      message: 'Exam created successfully'
+      data: result,
+      message: `Initialized ${result.created.length} exams for year ${year}`
     });
 
   } catch (err) {
-    console.error("Create Exam Error:", err);
+    console.error("Initialize Exams Error:", err);
     res.status(500).json({
       success: false,
-      error: "Failed to create exam: " + err.message
+      error: "Failed to initialize exams: " + err.message
     });
   }
 };
 
-// ============= GET ALL EXAMS =============
-const getAllExams = async (req, res) => {
+// Get all available exam types
+const getAvailableExamTypes = async (req, res) => {
   try {
-    const { examYear, examType } = req.query;
-
-    const whereClause = {};
-    if (examYear) whereClause.examYear = examYear;
-    if (examType) whereClause.examType = examType;
-
-    const exams = await Exam.findAll({
-      where: whereClause,
-      order: [['examYear', 'DESC'], ['startDate', 'DESC']],
-      include: [{
-        model: User,
-        as: 'addedByUser',
-        attributes: ['name', 'email']
-      }]
-    });
-
+    const exams = Object.values(EXAM_TYPES);
     res.json({
       success: true,
       data: exams
     });
-
   } catch (err) {
-    console.error("Get All Exams Error:", err);
     res.status(500).json({
       success: false,
-      error: "Failed to fetch exams"
+      error: err.message
     });
   }
 };
 
-// ============= ADD STUDENT RESULT BY EMAIL (Admin only) =============
-// NEW FUNCTION - Same pattern as markStudentAttendance
-const addStudentResultById = async (req, res) => {
+// Add student result with predefined exam type
+const addStudentResultByExamType = async (req, res) => {
   const transaction = await sequelize.transaction();
   
   try {
@@ -96,18 +93,25 @@ const addStudentResultById = async (req, res) => {
       });
     }
 
-    const { studentId, examId, subjects, rank, remarks, resultDate } = req.body;
+    const { 
+      studentId, 
+      examType, 
+      examYear,
+      subjects, 
+      rank, 
+      remarks, 
+      resultDate 
+    } = req.body;
 
-    if (!studentId || !examId || !subjects) {
+    if (!studentId || !examType || !examYear || !subjects) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required: studentId, examId, subjects'
+        error: 'Missing required fields: studentId, examType, examYear, subjects'
       });
     }
 
-    // ✅ Use helper to resolve student by ID (supports both formats)
+    // Get the student
     const student = await resolveStudentByIdentifier(studentId, transaction);
-
     if (!student) {
       return res.status(404).json({
         success: false,
@@ -115,31 +119,58 @@ const addStudentResultById = async (req, res) => {
       });
     }
 
-    const exam = await Exam.findByPk(examId);
+    // Get or create exam
+    let exam = await Exam.findOne({
+      where: { examType, examYear },
+      transaction
+    });
+
     if (!exam) {
-      return res.status(404).json({
-        success: false,
-        error: 'Exam not found'
-      });
+      // Auto-create exam if it doesn't exist
+      const { EXAM_SCHEDULE } = require('../utils/examConfig');
+      const schedule = EXAM_SCHEDULE[examType];
+      
+      exam = await Exam.create({
+        examType,
+        examYear,
+        term: schedule?.term || null,
+        startDate: resultDate || new Date(),
+        endDate: resultDate || new Date(),
+        weightage: schedule?.weightage || 0,
+        description: `${examType} for academic year ${examYear}`,
+        addedBy: req.user.id
+      }, { transaction });
     }
 
     // Check if result already exists
     const existingResult = await StudentResult.findOne({
-      where: { studentId: student.id, examId },
+      where: { studentId: student.id, examId: exam.id },
       transaction
     });
 
     if (existingResult) {
       return res.status(400).json({
         success: false,
-        error: `Result for ${student.user.name} in ${exam.examType} already exists`
+        error: `Result for ${student.user.name} in ${examType} already exists`
       });
     }
 
-    // ✅ Create result using student's data (no email lookup)
+    // Validate subjects based on class
+    const expectedSubjects = getSubjectsForClass(student.class);
+    const providedSubjects = subjects.map(s => s.subject);
+    
+    const missingSubjects = expectedSubjects.filter(s => !providedSubjects.includes(s));
+    if (missingSubjects.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: `Missing subjects: ${missingSubjects.join(', ')}`
+      });
+    }
+
+    // Create result
     const result = await StudentResult.create({
       studentId: student.id,
-      examId,
+      examId: exam.id,
       studentName: student.user.name,
       studentEmail: student.user.email,
       studentClass: student.class,
@@ -156,23 +187,18 @@ const addStudentResultById = async (req, res) => {
 
     await transaction.commit();
 
-    // Data is now available in:
-    // 1. Student's portal (when they log in)
-    // 2. Parent's portal (if parent email matches)
-    // 3. Teacher's portal (if teacher has access)
-
     res.status(201).json({
       success: true,
       data: {
         id: result.id,
         studentId: student.studentId,
         studentName: result.studentName,
-        studentClass: result.studentClass,
+        examType: examType,
         percentage: result.percentage,
         status: result.status,
         rank: result.rank
       },
-      message: `Result for ${student.user.name} added successfully`
+      message: `Result for ${student.user.name} in ${examType} added successfully`
     });
 
   } catch (err) {
@@ -185,344 +211,8 @@ const addStudentResultById = async (req, res) => {
   }
 };
 
-// Add to resultController.js (same pattern as attendanceController)
-const resolveStudentByIdentifier = async (identifier, transaction = null) => {
-  let student = null;
-  
-  // Try as database ID first
-  if (!isNaN(identifier) && identifier.toString().trim() !== '') {
-    student = await Student.findByPk(parseInt(identifier), {
-      include: [{ model: User, as: 'user' }],
-      transaction
-    });
-  }
-  
-  // Try as school ID (e.g., "STU001")
-  if (!student) {
-    student = await Student.findOne({
-      where: { studentId: identifier.toString() },
-      include: [{ model: User, as: 'user' }],
-      transaction
-    });
-  }
-  
-  return student;
-};
-
-// ============= GET STUDENT RESULT (Student/Parent Dashboard) =============
-const getStudentResult = async (req, res) => {
-  try {
-    const { studentId } = req.params;
-    const { examId, examType, year } = req.query;
-
-    const requestingUser = req.user;
-    const student = await Student.findByPk(studentId, {
-      include: [{ model: User, as: 'user' }]
-    });
-
-    if (!student) {
-      return res.status(404).json({
-        success: false,
-        error: 'Student not found'
-      });
-    }
-
-    // Authorization check
-    const isStudent = requestingUser.role === 'student' && requestingUser.id === student.userId;
-    const isParent = requestingUser.role === 'parent';
-    const isTeacher = requestingUser.role === 'teacher';
-    const isAdmin = requestingUser.role === 'admin';
-
-    // For parent: check if this student is their child
-    let isChildOfParent = false;
-    if (isParent) {
-      const parent = await Parent.findOne({ where: { userId: requestingUser.id } });
-      if (parent && parent.children && Array.isArray(parent.children) && parent.children.includes(studentId)) {
-        isChildOfParent = true;
-      }
-    }
-
-    if (!isStudent && !isChildOfParent && !isTeacher && !isAdmin) {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied'
-      });
-    }
-
-    // Build query
-    const whereClause = { studentId: student.id, isPublished: true };
-    
-    if (examId) {
-      whereClause.examId = examId;
-    }
-    
-    if (examType || year) {
-      const examWhere = {};
-      if (examType) examWhere.examType = examType;
-      if (year) examWhere.examYear = year;
-      
-      const exams = await Exam.findAll({ where: examWhere });
-      const examIds = exams.map(e => e.id);
-      whereClause.examId = { [Op.in]: examIds };
-    }
-
-    const results = await StudentResult.findAll({
-      where: whereClause,
-      include: [
-        {
-          model: Exam,
-          as: 'exam',
-          attributes: ['id', 'examType', 'examYear', 'term', 'startDate', 'endDate']
-        }
-      ],
-      order: [[{ model: Exam, as: 'exam' }, 'examYear', 'DESC'], 
-              [{ model: Exam, as: 'exam' }, 'startDate', 'DESC']]
-    });
-
-    // Calculate overall performance
-    let totalObtained = 0;
-    let totalMax = 0;
-    let passedExams = 0;
-    let failedExams = 0;
-
-    results.forEach(result => {
-      totalObtained += result.totalMarksObtained;
-      totalMax += result.totalMaxMarks;
-      if (result.status === 'Pass') {
-        passedExams++;
-      } else if (result.status === 'Fail') {
-        failedExams++;
-      }
-    });
-
-    const overallPercentage = totalMax > 0 ? (totalObtained / totalMax) * 100 : 0;
-
-    res.json({
-      success: true,
-      data: {
-        student: {
-          id: student.id,
-          name: student.user.name,
-          rollNumber: student.rollNumber,
-          class: student.class,
-          section: student.section,
-          email: student.user.email
-        },
-        results,
-        summary: {
-          totalExams: results.length,
-          passedExams,
-          failedExams,
-          totalMarksObtained: totalObtained,
-          totalMaxMarks: totalMax,
-          overallPercentage: overallPercentage.toFixed(2)
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error("Get Student Result Error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch results"
-    });
-  }
-};
-
-// ============= GET ALL RESULTS (Admin view) =============
-const getAllResults = async (req, res) => {
-  try {
-    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied'
-      });
-    }
-
-    const { examId, class: className, section, status } = req.query;
-
-    const whereClause = {};
-    if (examId) whereClause.examId = examId;
-    if (className) whereClause.studentClass = className;
-    if (section) whereClause.studentSection = section;
-    if (status) whereClause.status = status;
-
-    const results = await StudentResult.findAll({
-      where: whereClause,
-      include: [
-        {
-          model: Exam,
-          as: 'exam',
-          attributes: ['id', 'examType', 'examYear', 'term']
-        }
-      ],
-      order: [['studentClass', 'ASC'], ['studentSection', 'ASC'], ['studentRollNumber', 'ASC']]
-    });
-
-    res.json({
-      success: true,
-      data: results,
-      count: results.length
-    });
-
-  } catch (err) {
-    console.error("Get All Results Error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch results"
-    });
-  }
-};
-
-// ============= UPDATE STUDENT RESULT (Admin only) =============
-const updateStudentResult = async (req, res) => {
-  const transaction = await sequelize.transaction();
-  
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Only admin can update results'
-      });
-    }
-
-    const { id } = req.params;
-    const { subjects, rank, remarks, isPublished } = req.body;
-
-    const result = await StudentResult.findByPk(id);
-
-    if (!result) {
-      return res.status(404).json({
-        success: false,
-        error: 'Result not found'
-      });
-    }
-
-    const updateData = {};
-    if (subjects) updateData.subjects = subjects;
-    if (rank !== undefined) updateData.rank = rank;
-    if (remarks !== undefined) updateData.remarks = remarks;
-    if (isPublished !== undefined) updateData.isPublished = isPublished;
-
-    await result.update(updateData, { transaction });
-    await transaction.commit();
-
-    res.json({
-      success: true,
-      data: result,
-      message: 'Result updated successfully'
-    });
-
-  } catch (err) {
-    await transaction.rollback();
-    console.error("Update Result Error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to update result"
-    });
-  }
-};
-
-// ============= DELETE RESULT (Admin only) =============
-const deleteResult = async (req, res) => {
-  const transaction = await sequelize.transaction();
-  
-  try {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({
-        success: false,
-        error: 'Only admin can delete results'
-      });
-    }
-
-    const { id } = req.params;
-    const result = await StudentResult.findByPk(id);
-    
-    if (!result) {
-      return res.status(404).json({
-        success: false,
-        error: 'Result not found'
-      });
-    }
-
-    await result.destroy({ transaction });
-    await transaction.commit();
-
-    res.json({
-      success: true,
-      message: 'Result deleted successfully'
-    });
-
-  } catch (err) {
-    await transaction.rollback();
-    console.error("Delete Result Error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to delete result"
-    });
-  }
-};
-
-// ============= GET CLASS RESULTS =============
-const getClassResults = async (req, res) => {
-  try {
-    const { examId, class: className, section } = req.query;
-
-    if (req.user.role !== 'admin' && req.user.role !== 'teacher') {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied'
-      });
-    }
-
-    if (!examId || !className) {
-      return res.status(400).json({
-        success: false,
-        error: 'Exam ID and Class are required'
-      });
-    }
-
-    const whereClause = { examId, studentClass: className };
-    if (section) whereClause.studentSection = section;
-
-    const results = await StudentResult.findAll({
-      where: whereClause,
-      include: [{ model: Exam, as: 'exam' }],
-      order: [['studentRollNumber', 'ASC']]
-    });
-
-    // Calculate ranks
-    const sortedResults = [...results].sort((a, b) => b.percentage - a.percentage);
-    let currentRank = 1;
-    for (let i = 0; i < sortedResults.length; i++) {
-      if (i > 0 && sortedResults[i].percentage === sortedResults[i-1].percentage) {
-        sortedResults[i].rank = sortedResults[i-1].rank;
-      } else {
-        sortedResults[i].rank = currentRank;
-      }
-      currentRank++;
-      
-      // Update rank in database
-      await sortedResults[i].update({ rank: sortedResults[i].rank });
-    }
-
-    res.json({
-      success: true,
-      data: results,
-      count: results.length
-    });
-
-  } catch (err) {
-    console.error("Get Class Results Error:", err);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch class results"
-    });
-  }
-};
-
-// ============= ADD BULK RESULTS (Admin only) =============
-const addBulkResults = async (req, res) => {
+// Add bulk results by class and exam type
+const addBulkResultsByClass = async (req, res) => {
   const transaction = await sequelize.transaction();
   
   try {
@@ -533,74 +223,98 @@ const addBulkResults = async (req, res) => {
       });
     }
 
-    const { examId, results } = req.body;
+    const { 
+      class: className, 
+      section, 
+      examType, 
+      examYear,
+      subjectMarks,
+      resultDate 
+    } = req.body;
 
-    if (!examId || !results || !Array.isArray(results)) {
+    if (!className || !examType || !examYear || !subjectMarks) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: examId, results (array)'
+        error: 'Missing required fields: class, examType, examYear, subjectMarks'
       });
     }
 
-    const exam = await Exam.findByPk(examId);
-    if (!exam) {
+    // Get all students in the class
+    const students = await Student.findAll({
+      where: { 
+        class: className,
+        ...(section && { section })
+      },
+      include: [{ model: User, as: 'user' }],
+      transaction
+    });
+
+    if (students.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'Exam not found'
+        error: `No students found in class ${className}${section ? '-' + section : ''}`
       });
     }
 
-    const createdResults = [];
+    // Get or create exam
+    let exam = await Exam.findOne({
+      where: { examType, examYear },
+      transaction
+    });
+
+    if (!exam) {
+      const { EXAM_SCHEDULE } = require('../utils/examConfig');
+      const schedule = EXAM_SCHEDULE[examType];
+      
+      exam = await Exam.create({
+        examType,
+        examYear,
+        term: schedule?.term || null,
+        startDate: resultDate || new Date(),
+        endDate: resultDate || new Date(),
+        weightage: schedule?.weightage || 0,
+        description: `${examType} for academic year ${examYear}`,
+        addedBy: req.user.id
+      }, { transaction });
+    }
+
+    const results = [];
     const errors = [];
 
-    for (const resultData of results) {
+    for (const student of students) {
       try {
-        const { email, subjects, rank, remarks } = resultData;
-
-        const user = await User.findOne({
-          where: { email: email.toLowerCase(), role: 'student' }
-        });
-
-        if (!user) {
-          errors.push({ email, error: 'Student not found' });
+        const studentMarks = subjectMarks[student.rollNumber];
+        if (!studentMarks) {
+          errors.push({ rollNumber: student.rollNumber, error: 'No marks provided' });
           continue;
         }
 
-       const student = await resolveStudentByIdentifier(resultData.studentId, transaction);
-
-        if (!student) {
-        errors.push({ studentId: resultData.studentId, error: 'Student not found' });
-        continue;
-      }
-
-        const existingResult = await StudentResult.findOne({
-          where: { studentId: student.id, examId }
-        });
-
-        if (existingResult) {
-          errors.push({ email, error: 'Result already exists' });
-          continue;
-        }
+        // Format subjects with marks
+        const subjects = Object.keys(studentMarks).map(subjectName => ({
+          subject: subjectName,
+          totalMarks: 100, // Default max marks
+          passingMarks: 33,
+          scoredMarks: studentMarks[subjectName]
+        }));
 
         const result = await StudentResult.create({
           studentId: student.id,
-          examId,
-          studentName: user.name,
-          studentEmail: user.email,
+          examId: exam.id,
+          studentName: student.user.name,
+          studentEmail: student.user.email,
           studentClass: student.class,
           studentSection: student.section,
           studentRollNumber: student.rollNumber,
           parentEmail: student.parentEmail || null,
-          subjects,
-          rank: rank || null,
-          remarks: remarks || null,
+          subjects: subjects,
+          resultDate: resultDate || new Date(),
           addedBy: req.user.id,
           isPublished: true
         }, { transaction });
 
-        createdResults.push(result);
+        results.push(result);
       } catch (err) {
-        errors.push({ email: resultData.email, error: err.message });
+        errors.push({ rollNumber: student.rollNumber, error: err.message });
       }
     }
 
@@ -609,12 +323,15 @@ const addBulkResults = async (req, res) => {
     res.status(201).json({
       success: true,
       data: {
-        created: createdResults.length,
+        totalStudents: students.length,
+        resultsAdded: results.length,
         errors: errors,
-        totalCreated: createdResults.length,
-        totalErrors: errors.length
+        exam: {
+          type: examType,
+          year: examYear
+        }
       },
-      message: `${createdResults.length} results added successfully`
+      message: `Added results for ${results.length} students in ${examType}`
     });
 
   } catch (err) {
@@ -627,15 +344,100 @@ const addBulkResults = async (req, res) => {
   }
 };
 
+// Get class performance across all exams
+const getClassPerformance = async (req, res) => {
+  try {
+    const { class: className, section, examYear } = req.query;
+
+    if (!className || !examYear) {
+      return res.status(400).json({
+        success: false,
+        error: 'Class and exam year are required'
+      });
+    }
+
+    const students = await Student.findAll({
+      where: { 
+        class: className,
+        ...(section && { section })
+      },
+      include: [{ model: User, as: 'user' }]
+    });
+
+    const exams = await Exam.findAll({
+      where: { examYear },
+      order: [['startDate', 'ASC']]
+    });
+
+    const performanceData = [];
+
+    for (const student of students) {
+      const studentResults = [];
+      let totalPercentage = 0;
+      let examCount = 0;
+
+      for (const exam of exams) {
+        const result = await StudentResult.findOne({
+          where: {
+            studentId: student.id,
+            examId: exam.id
+          }
+        });
+
+        if (result) {
+          studentResults.push({
+            examType: exam.examType,
+            percentage: result.percentage,
+            status: result.status,
+            rank: result.rank
+          });
+          totalPercentage += parseFloat(result.percentage);
+          examCount++;
+        }
+      }
+
+      performanceData.push({
+        student: {
+          id: student.studentId,
+          name: student.user.name,
+          rollNumber: student.rollNumber,
+          class: student.class,
+          section: student.section
+        },
+        exams: studentResults,
+        averagePercentage: examCount > 0 ? (totalPercentage / examCount).toFixed(2) : 0
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        class: `${className}${section ? '-' + section : ''}`,
+        examYear: examYear,
+        totalExams: exams.length,
+        students: performanceData
+      }
+    });
+
+  } catch (err) {
+    console.error("Get Class Performance Error:", err);
+    res.status(500).json({
+      success: false,
+      error: "Failed to fetch class performance"
+    });
+  }
+};
+
 module.exports = {
-  createExam,
-  getAllExams,
-  addStudentResultById,
-  resolveStudentByIdentifier,
-  getStudentResult,
-  getAllResults,
-  updateStudentResult,
-  deleteResult,
-  getClassResults,
-  addBulkResults
+  initializeExamsForYear,
+  getAvailableExamTypes,
+  addStudentResultByExamType,
+  addBulkResultsByClass,
+  getStudentResult: require('./resultController').getStudentResult,
+  getAllResults: require('./resultController').getAllResults,
+  updateStudentResult: require('./resultController').updateStudentResult,
+  deleteResult: require('./resultController').deleteResult,
+  getClassResults: require('./resultController').getClassResults,
+  getClassPerformance,
+  resolveStudentByIdentifier
 };
