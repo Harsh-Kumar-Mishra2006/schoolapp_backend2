@@ -94,8 +94,8 @@ const addFee = async (req, res) => {
     const existingFee = await Fee.findOne({
       where: {
         studentId: student.id,
-        feeMonth: feeMonth,
-        feeYear: feeYear
+        feemonth: feeMonth,
+        feeyear: feeYear
       },
       transaction
     });
