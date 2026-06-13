@@ -34,6 +34,7 @@ const Fee = sequelize.define('Fee', {
   feeYear: {
     type: DataTypes.INTEGER,
     allowNull: false,
+    field: 'feeyear',
     comment: 'Year for which fee is due'
   },
   dueDate: {
@@ -95,7 +96,7 @@ const Fee = sequelize.define('Fee', {
   indexes: [
     {
       unique: true,
-      fields: ['studentId', 'feemonth', 'feeYear'],
+      fields: ['studentId', 'feemonth', 'feeyear'],
       name: 'unique_student_monthly_fee'
     },
     {
