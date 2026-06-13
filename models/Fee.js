@@ -1,4 +1,7 @@
-// models/Fee.js - Updated for TiDB (use lowercase/snake_case)
+const { DataTypes } = require('sequelize');
+const { sequelize } = require('../config/db');
+const Student = require('./Student');
+
 const Fee = sequelize.define('Fee', {
   id: {
     type: DataTypes.INTEGER,
@@ -8,79 +11,142 @@ const Fee = sequelize.define('Fee', {
   studentId: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    field: 'student_id',  // Map to snake_case
-  },
-  feeMonth: {
-    type: DataTypes.STRING(20),
-    allowNull: false,
-    field: 'fee_month',  // Map to snake_case
-  },
-  feeYear: {
-    type: DataTypes.INTEGER,
-    allowNull: false,
-    field: 'fee_year',  // Map to snake_case
+    references: {
+      model: 'Students',
+      key: 'id'
+    }
   },
   feeComponents: {
     type: DataTypes.JSON,
     allowNull: false,
     defaultValue: [],
-    field: 'fee_components',
+    comment: 'Array of fee components with name and amount'
+  },
+  feeMonth: {
+    type: DataTypes.STRING(20),
+    allowNull: false,
+    comment: 'Month for which fee is due (e.g., January)'
+  },
+  feeYear: {
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    comment: 'Year for which fee is due'
+  },
+  dueDate: {
+    type: DataTypes.DATEONLY,
+    allowNull: false
   },
   totalAmount: {
     type: DataTypes.DECIMAL(10, 2),
-    defaultValue: 0,
-    field: 'total_amount',
+    defaultValue: 0
   },
   totalPaid: {
     type: DataTypes.DECIMAL(10, 2),
-    defaultValue: 0,
-    field: 'total_paid',
+    defaultValue: 0
   },
   balanceAmount: {
     type: DataTypes.DECIMAL(10, 2),
-    defaultValue: 0,
-    field: 'balance_amount',
+    defaultValue: 0
   },
   status: {
-    type: DataTypes.STRING(20),
-    defaultValue: 'Pending',
+    type: DataTypes.ENUM('Pending', 'Partially Paid', 'Paid', 'Overdue'),
+    defaultValue: 'Pending'
   },
   payments: {
     type: DataTypes.JSON,
     defaultValue: [],
+    comment: 'Array of payment transactions'
   },
   lastPaymentDate: {
     type: DataTypes.DATEONLY,
-    allowNull: true,
-    field: 'last_payment_date',
+    allowNull: true
   },
   lastPaymentAmount: {
     type: DataTypes.DECIMAL(10, 2),
-    allowNull: true,
-    field: 'last_payment_amount',
-  },
-  dueDate: {
-    type: DataTypes.DATEONLY,
-    allowNull: false,
-    field: 'due_date',
+    allowNull: true
   },
   remarks: {
     type: DataTypes.TEXT,
-    allowNull: true,
+    allowNull: true
   },
   addedBy: {
     type: DataTypes.INTEGER,
     allowNull: false,
-    field: 'added_by',
+    references: {
+      model: 'Users',
+      key: 'id'
+    }
   },
   isPublished: {
     type: DataTypes.BOOLEAN,
-    defaultValue: true,
-    field: 'is_published',
-  },
+    defaultValue: true
+  }
 }, {
   timestamps: true,
   tableName: 'Fees',
-  createdAt: 'created_at',
-  updatedAt: 'updated_at',
+  indexes: [
+    {
+      unique: true,
+      fields: ['studentId', 'feeMonth', 'feeYear'],
+      name: 'unique_student_monthly_fee'
+    },
+    {
+      fields: ['status', 'dueDate']
+    }
+  ]
 });
+
+// Hook to calculate total amount before saving
+Fee.beforeSave(async (fee) => {
+  if (fee.feeComponents && Array.isArray(fee.feeComponents)) {
+    const total = fee.feeComponents.reduce((sum, component) => {
+      return sum + (parseFloat(component.amount) || 0);
+    }, 0);
+    fee.totalAmount = total;
+    fee.balanceAmount = total - (parseFloat(fee.totalPaid) || 0);
+  }
+});
+
+// Helper method to add payment
+Fee.prototype.addPayment = async function(paymentData, transaction) {
+  const payments = this.payments || [];
+  const newPayment = {
+    id: payments.length + 1,
+    date: paymentData.date || new Date().toISOString().split('T')[0],
+    amount: parseFloat(paymentData.amount),
+    mode: paymentData.mode,
+    receiptNo: paymentData.receiptNo || `REC-${Date.now()}`,
+    collectedBy: paymentData.collectedBy,
+    remarks: paymentData.remarks || null
+  };
+  
+  payments.push(newPayment);
+  const newTotalPaid = (parseFloat(this.totalPaid) || 0) + parseFloat(paymentData.amount);
+  const newBalanceAmount = (parseFloat(this.totalAmount) || 0) - newTotalPaid;
+  
+  let newStatus = this.status;
+  if (newBalanceAmount <= 0) {
+    newStatus = 'Paid';
+  } else if (newTotalPaid > 0) {
+    newStatus = 'Partially Paid';
+  } else {
+    newStatus = 'Pending';
+  }
+  
+  await this.update({
+    payments: payments,
+    totalPaid: newTotalPaid,
+    balanceAmount: newBalanceAmount,
+    status: newStatus,
+    lastPaymentDate: newPayment.date,
+    lastPaymentAmount: newPayment.amount
+  }, { transaction });
+  
+  return newPayment;
+};
+
+// Associations
+Fee.belongsTo(Student, { foreignKey: 'studentId', as: 'student' });
+Student.hasMany(Fee, { foreignKey: 'studentId', as: 'fees' });
+
+module.exports = Fee;
